@@ -10,9 +10,14 @@ const SiteFooter = () => {
           <div className="md:col-span-2">
             <Link
               to="/"
-              className="font-display text-2xl font-bold uppercase tracking-tight mb-4 block"
+              className="flex items-center gap-3 font-display text-2xl font-bold uppercase tracking-tight mb-4"
             >
-              Gear Up <span className="text-primary">To Fit</span>
+              <img
+                src="https://gearuptofit.com/wp-content/uploads/2023/03/cropped-Grey-Black-Illustration-Gym-Fitness-Logo.png"
+                alt="Gear Up To Fit"
+                className="h-10 w-10 object-contain"
+              />
+              <span>Gear Up <span className="text-primary">To Fit</span></span>
             </Link>
             <p className="text-muted-foreground font-body text-sm leading-relaxed max-w-md">
               Your comprehensive resource for fitness, running, nutrition, and health.
