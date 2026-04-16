@@ -47,23 +47,23 @@ const SiteFooter = () => {
             </h4>
             <ul className="space-y-2">
               <li>
+                <a href="https://shoe-match.gearuptofit.com/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                  Shoe Finder Tool
+                </a>
+              </li>
+              <li>
+                <a href="https://fitness-plan.gearuptofit.com/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                  8-Week Training Plan
+                </a>
+              </li>
+              <li>
                 <a href="https://fitness-calculators.gearuptofit.com/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
                   Fitness Calculators
                 </a>
               </li>
               <li>
-                <a href="https://gearuptofit.com/fitness/video-workout/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
-                  Video Workouts
-                </a>
-              </li>
-              <li>
-                <a href="https://gearuptofit.com/health/supplements/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
-                  Supplements Guide
-                </a>
-              </li>
-              <li>
-                <a href="https://gearuptofit.com/review/smartwatch/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
-                  Smartwatch Reviews
+                <a href="/calculators" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                  All Calculators
                 </a>
               </li>
             </ul>
