@@ -57,11 +57,6 @@ const SiteHeader = () => {
           </nav>
 
           <div className="flex items-center gap-3">
-            <a href="https://gearuptofit.com/" target="_blank" rel="noopener noreferrer"
-              className="px-4 py-2 bg-primary font-display text-xs uppercase tracking-widest font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] rounded-sm hidden sm:inline-flex text-primary-foreground">
-              Visit Site
-            </a>
-
             {/* Mobile hamburger */}
             <button onClick={() => setMobileOpen(!mobileOpen)} className="lg:hidden flex items-center justify-center w-10 h-10 text-foreground" aria-label="Toggle menu">
               {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -96,10 +91,14 @@ const SiteHeader = () => {
                   );
                 })}
               </div>
-              <div className="p-4 border-t border-border">
-                <a href="https://gearuptofit.com/" target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-primary font-display text-sm uppercase tracking-widest font-bold rounded-sm text-primary-foreground">
-                  Visit GearUpToFit →
+              <div className="p-4 border-t border-border grid grid-cols-2 gap-3">
+                <a href="https://shoe-match.gearuptofit.com/" target="_blank" rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-primary font-display text-xs uppercase tracking-widest font-bold rounded-sm text-primary-foreground">
+                  Shoe Finder
+                </a>
+                <a href="https://fitness-plan.gearuptofit.com/" target="_blank" rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full px-4 py-3 border border-primary/50 font-display text-xs uppercase tracking-widest font-bold rounded-sm text-primary hover:bg-primary/10">
+                  Training Plan
                 </a>
               </div>
             </motion.nav>

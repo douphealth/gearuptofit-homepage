@@ -21,19 +21,29 @@ const CTASection = () => {
           </h2>
 
           <p className="text-lg md:text-xl text-muted-foreground font-body max-w-2xl mx-auto mb-10 leading-relaxed">
-            Join thousands of readers who trust GearUpToFit for science-backed fitness advice,
-            honest gear reviews, and real transformation strategies.
+            Get personalized shoe recommendations with our AI-powered Shoe Finder, or build your custom
+            8-week training plan. Science-backed fitness tools designed for real results.
           </p>
 
-          <a
-            href="https://gearuptofit.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center justify-center gap-2 px-10 py-5 bg-primary font-display text-xl uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
-          >
-            Visit GearUpToFit.com
-            <ArrowRight className="w-5 h-5" />
-          </a>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <a
+              href="https://shoe-match.gearuptofit.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-10 py-5 bg-primary font-display text-xl uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
+            >
+              Find Your Perfect Shoe
+              <ArrowRight className="w-5 h-5" />
+            </a>
+            <a
+              href="https://fitness-plan.gearuptofit.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-10 py-5 border border-primary/50 font-display text-xl uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
+            >
+              8-Week Plan
+            </a>
+          </div>
         </motion.div>
       </div>
     </section>
