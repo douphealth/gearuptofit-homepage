@@ -1,4 +1,3 @@
-import { Helmet } from "react-helmet-async";
 import SiteHeader from "@/components/SiteHeader";
 import HeroSection from "@/components/HeroSection";
 import LiveTicker from "@/components/LiveTicker";
