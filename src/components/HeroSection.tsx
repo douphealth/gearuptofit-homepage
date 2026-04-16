@@ -40,25 +40,40 @@ const HeroSection = () => {
           </h1>
 
           <p className="text-lg md:text-xl text-muted-foreground max-w-xl mb-8 font-body leading-relaxed">
-            The most comprehensive fitness resource on the web. 200+ articles covering
-            workouts, running, nutrition, and gear — all backed by science and real-world testing.
+            Answer 9 quick questions and get a personalized shoe recommendation based on your training, pace, and goals.
+            Or build your custom 8-week running & fitness plan — all backed by science and real-world testing.
           </p>
 
-          <div className="flex flex-col sm:flex-row gap-4">
-            <a
-              href="https://gearuptofit.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-primary font-display text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
-            >
-              Explore GearUpToFit
-              <ArrowRight className="w-5 h-5" />
-            </a>
+          <div className="flex flex-col gap-4">
+            {/* Primary CTAs */}
+            <div className="flex flex-col sm:flex-row gap-4">
+              <a
+                href="https://shoe-match.gearuptofit.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-primary font-display text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
+              >
+                <span className="hidden sm:inline">Find Your Perfect Shoe</span>
+                <span className="sm:hidden">Shoe Finder</span>
+                <ArrowRight className="w-5 h-5" />
+              </a>
+              <a
+                href="https://fitness-plan.gearuptofit.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2 px-8 py-4 border border-primary/50 font-display text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
+              >
+                <span className="hidden sm:inline">8-Week Training Plan</span>
+                <span className="sm:hidden">Training Plan</span>
+              </a>
+            </div>
+            
+            {/* Secondary CTA */}
             <a
               href="#categories"
-              className="inline-flex items-center justify-center gap-2 px-8 py-4 border border-foreground/20 font-display text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:border-primary hover:text-primary active:scale-[0.97] rounded-sm"
+              className="inline-flex items-center justify-center gap-2 px-8 py-3 border border-foreground/20 font-display text-sm uppercase tracking-wider font-semibold transition-all duration-200 hover:border-primary hover:text-primary active:scale-[0.97] rounded-sm text-muted-foreground"
             >
-              Browse Topics
+              Browse All Topics
             </a>
           </div>
         </motion.div>

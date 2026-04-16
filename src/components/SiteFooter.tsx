@@ -1,4 +1,5 @@
 import { categories } from "@/lib/blog-data";
+import { Link } from "react-router-dom";
 
 const SiteFooter = () => {
   return (
@@ -7,16 +8,14 @@ const SiteFooter = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
           {/* Brand */}
           <div className="md:col-span-2">
-            <a
-              href="https://gearuptofit.com/"
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              to="/"
               className="font-display text-2xl font-bold uppercase tracking-tight mb-4 block"
             >
               Gear Up <span className="text-primary">To Fit</span>
-            </a>
+            </Link>
             <p className="text-muted-foreground font-body text-sm leading-relaxed max-w-md">
-              GearUpToFit.com is your comprehensive resource for fitness, running, nutrition, and health.
+              Your comprehensive resource for fitness, running, nutrition, and health.
               Expert-written articles, honest gear reviews, and science-backed advice to help you achieve
               your fitness goals.
             </p>
@@ -30,14 +29,12 @@ const SiteFooter = () => {
             <ul className="space-y-2">
               {categories.map((cat) => (
                 <li key={cat.slug}>
-                  <a
-                    href={cat.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <Link
+                    to={`/${cat.slug}`}
                     className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body"
                   >
                     {cat.name}
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -50,23 +47,23 @@ const SiteFooter = () => {
             </h4>
             <ul className="space-y-2">
               <li>
+                <a href="https://shoe-match.gearuptofit.com/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                  Shoe Finder Tool
+                </a>
+              </li>
+              <li>
+                <a href="https://fitness-plan.gearuptofit.com/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                  8-Week Training Plan
+                </a>
+              </li>
+              <li>
                 <a href="https://fitness-calculators.gearuptofit.com/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
                   Fitness Calculators
                 </a>
               </li>
               <li>
-                <a href="https://gearuptofit.com/fitness/video-workout/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
-                  Video Workouts
-                </a>
-              </li>
-              <li>
-                <a href="https://gearuptofit.com/health/supplements/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
-                  Supplements Guide
-                </a>
-              </li>
-              <li>
-                <a href="https://gearuptofit.com/review/smartwatch/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
-                  Smartwatch Reviews
+                <a href="/calculators" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                  All Calculators
                 </a>
               </li>
             </ul>
