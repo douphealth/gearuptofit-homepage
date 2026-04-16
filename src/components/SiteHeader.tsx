@@ -35,8 +35,13 @@ const SiteHeader = () => {
         className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-border"
       >
         <div className="container flex items-center justify-between h-14 sm:h-16">
-          <Link to="/" className="font-display text-lg sm:text-xl font-bold uppercase tracking-tight">
-            Gear Up <span className="text-primary">To Fit</span>
+          <Link to="/" className="flex items-center gap-2 font-display text-lg sm:text-xl font-bold uppercase tracking-tight">
+            <img
+              src="https://gearuptofit.com/wp-content/uploads/2023/03/cropped-Grey-Black-Illustration-Gym-Fitness-Logo.png"
+              alt="Gear Up To Fit"
+              className="h-8 w-8 sm:h-9 sm:w-9 object-contain"
+            />
+            <span className="hidden sm:inline">Gear Up <span className="text-primary">To Fit</span></span>
           </Link>
 
           {/* Desktop nav */}
