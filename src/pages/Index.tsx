@@ -8,6 +8,7 @@ import TrendingSection from "@/components/TrendingSection";
 import DeepDiveSection from "@/components/DeepDiveSection";
 import CalculatorsHub from "@/components/CalculatorsHub";
 import FAQSection from "@/components/FAQSection";
+import TrustSignals from "@/components/TrustSignals";
 import CTASection from "@/components/CTASection";
 import SiteFooter from "@/components/SiteFooter";
 
@@ -27,6 +28,7 @@ const Index = () => {
           <TrendingSection />
           <DeepDiveSection />
           <CalculatorsHub />
+          <TrustSignals />
           <FAQSection />
           <CTASection />
         </article>

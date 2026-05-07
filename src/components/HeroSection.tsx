@@ -31,7 +31,7 @@ const HeroSection = () => {
             </span>
           </div>
 
-          <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold uppercase tracking-tight leading-[0.9] mb-6">
+          <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold uppercase tracking-tight leading-[0.9] mb-6" data-speakable>
             <span className="block">Gear Up.</span>
             <span className="block text-gradient-red">Get Fit.</span>
             <span className="block text-muted-foreground text-3xl md:text-4xl lg:text-5xl mt-2 font-medium">
