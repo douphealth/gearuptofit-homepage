@@ -1,0 +1,11 @@
+name = "gearuptofit-sitemap-router"
+main = "worker.js"
+compatibility_date = "2026-05-07"
+
+routes = [
+  { pattern = "gearuptofit.com/sitemap.xml", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/sitemap_index.xml", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/sitemap-posts.xml", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/sitemap-pages.xml", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/sitemap-lovable.xml", zone_name = "gearuptofit.com" }
+]
