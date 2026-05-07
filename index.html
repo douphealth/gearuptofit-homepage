@@ -2,15 +2,32 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Performance: Preconnect to critical origins -->
+    <link rel="preconnect" href="https://gearuptofit.com" />
+    <link rel="preconnect" href="https://shoe-match.gearuptofit.com" />
+    <link rel="preconnect" href="https://fitness-plan.gearuptofit.com" />
+    <link rel="dns-prefetch" href="https://fitness-calculators.gearuptofit.com" />
+
     <!-- Primary SEO -->
-    <title>GearUpToFit — Expert Fitness Guides, Running Gear Reviews & Nutrition Science</title>
-    <meta name="description" content="Your fitness command center. 200+ expert articles on workouts, running gear, nutrition science, health tools, and honest reviews — all backed by real-world testing and sports science.">
+    <title>GearUpToFit — Expert Fitness Guides, Running Shoe Finder & Free Calculators</title>
+    <meta name="description" content="Personalized running shoe recommendations, custom 8-week training plans, 16+ free fitness calculators, and 200+ expert guides on workouts, nutrition, and gear — backed by sports science." />
+    <meta name="keywords" content="running shoe finder, fitness calculators, TDEE calculator, BMI calculator, macro calculator, 8 week training plan, running gear reviews, fitness blog, nutrition science, beginner running plan" />
     <link rel="canonical" href="https://gearuptofit.com/" />
-    <meta name="author" content="GearUpToFit" />
+    <link rel="alternate" hreflang="en" href="https://gearuptofit.com/" />
+    <link rel="alternate" hreflang="x-default" href="https://gearuptofit.com/" />
+    <meta name="author" content="GearUpToFit Editorial Team" />
+    <meta name="publisher" content="GearUpToFit" />
+    <meta name="copyright" content="GearUpToFit" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
-    
+    <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <meta name="bingbot" content="index, follow" />
+
     <!-- GEO: Generative Engine Optimization -->
     <meta name="subject" content="Fitness, Running, Nutrition, Health, Gear Reviews, Fitness Calculators" />
     <meta name="classification" content="Health & Fitness" />
@@ -19,31 +36,36 @@
     <meta name="distribution" content="global" />
     <meta name="rating" content="general" />
     <meta name="revisit-after" content="3 days" />
-    
-    <!-- AEO: Answer Engine Optimization - Speakable -->
+    <meta name="audience" content="all" />
+
+    <!-- AEO: Answer Engine Optimization -->
     <meta name="google" content="nositelinkssearchbox" />
-    
+    <meta name="article:publisher" content="https://gearuptofit.com" />
+
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="GearUpToFit" />
     <meta property="og:locale" content="en_US" />
     <meta property="og:url" content="https://gearuptofit.com/" />
-    <meta property="og:title" content="GearUpToFit — Expert Fitness Guides, Running Gear Reviews & Nutrition Science" />
-    <meta property="og:description" content="Your fitness command center. 200+ expert articles on workouts, running gear, nutrition science, and health tools — all backed by real-world testing." />
+    <meta property="og:title" content="GearUpToFit — Expert Fitness Guides, Running Shoe Finder & Free Calculators" />
+    <meta property="og:description" content="Personalized running shoe recommendations, custom 8-week training plans, 16+ free fitness calculators, and 200+ expert guides — backed by sports science." />
     <meta property="og:image" content="https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8e83bc42-7fa4-4355-967d-84624a5afe65/id-preview-737e830f--1a1b5c81-dfdc-44ae-a466-09a0d9cb3d60.lovable.app-1774189611030.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="GearUpToFit — Expert fitness guides, running shoe finder, and free calculators" />
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:site" content="@GearUpToFit" />
-    <meta name="twitter:title" content="GearUpToFit — Expert Fitness Guides, Running Gear Reviews & Nutrition Science" />
-    <meta name="twitter:description" content="Your fitness command center. 200+ expert articles on workouts, running gear, nutrition science, and health tools — all backed by real-world testing." />
+    <meta name="twitter:creator" content="@GearUpToFit" />
+    <meta name="twitter:title" content="GearUpToFit — Expert Fitness Guides, Running Shoe Finder & Free Calculators" />
+    <meta name="twitter:description" content="Personalized shoe matching, 8-week training plans, 16+ free calculators, 200+ expert guides — backed by sports science." />
     <meta name="twitter:image" content="https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8e83bc42-7fa4-4355-967d-84624a5afe65/id-preview-737e830f--1a1b5c81-dfdc-44ae-a466-09a0d9cb3d60.lovable.app-1774189611030.png" />
-    
+
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="https://gearuptofit.com/wp-content/uploads/2023/03/cropped-Grey-Black-Illustration-Gym-Fitness-Logo.png" />
     <link rel="apple-touch-icon" href="https://gearuptofit.com/wp-content/uploads/2023/03/cropped-Grey-Black-Illustration-Gym-Fitness-Logo.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
 
     <!-- JSON-LD: Organization -->
     <script type="application/ld+json">
@@ -184,6 +206,80 @@
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.8", "ratingCount": "2450" },
       "description": "16+ free science-based fitness calculators: BMI, TDEE, macro, body fat, calorie burn, and more."
+    }
+    </script>
+
+    <!-- JSON-LD: HowTo (Shoe Finder) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "How to Find Your Perfect Running Shoe in Under 2 Minutes",
+      "description": "A 9-question quiz that recommends the ideal running shoe based on your foot type, weekly mileage, pace, training surface, and goals.",
+      "totalTime": "PT2M",
+      "estimatedCost": { "@type": "MonetaryAmount", "currency": "USD", "value": "0" },
+      "tool": [{ "@type": "HowToTool", "name": "GearUpToFit Shoe Finder Quiz" }],
+      "step": [
+        { "@type": "HowToStep", "position": 1, "name": "Open the Shoe Finder", "text": "Visit shoe-match.gearuptofit.com to launch the free 9-question quiz.", "url": "https://shoe-match.gearuptofit.com/" },
+        { "@type": "HowToStep", "position": 2, "name": "Answer 9 questions", "text": "Tell us your foot type, weekly mileage, goal race distance, training surface, and budget." },
+        { "@type": "HowToStep", "position": 3, "name": "Get personalized matches", "text": "Receive 3 ranked shoe recommendations with detailed reasoning and direct purchase links." }
+      ]
+    }
+    </script>
+
+    <!-- JSON-LD: HowTo (TDEE) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "How to Calculate Your TDEE (Total Daily Energy Expenditure)",
+      "description": "Use the Mifflin-St Jeor equation to calculate BMR, then multiply by an activity factor to determine your daily calorie needs.",
+      "totalTime": "PT1M",
+      "step": [
+        { "@type": "HowToStep", "position": 1, "name": "Calculate BMR", "text": "Men: BMR = (10 × kg) + (6.25 × cm) − (5 × age) + 5. Women: subtract 161 instead of adding 5." },
+        { "@type": "HowToStep", "position": 2, "name": "Multiply by activity factor", "text": "Sedentary 1.2, Light 1.375, Moderate 1.55, Active 1.725, Athlete 1.9." },
+        { "@type": "HowToStep", "position": 3, "name": "Apply your goal", "text": "Subtract 300–500 kcal for fat loss, eat at TDEE for maintenance, or add 250–500 kcal for lean-mass gain." }
+      ]
+    }
+    </script>
+
+    <!-- JSON-LD: WebApplication (Shoe Finder) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "GearUpToFit Running Shoe Finder",
+      "url": "https://shoe-match.gearuptofit.com/",
+      "applicationCategory": "HealthApplication",
+      "operatingSystem": "Web",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.9", "ratingCount": "1820" },
+      "description": "Answer 9 questions and receive 3 science-backed running shoe matches in under 2 minutes."
+    }
+    </script>
+
+    <!-- JSON-LD: Speakable (Voice AEO) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "url": "https://gearuptofit.com/",
+      "name": "GearUpToFit Homepage",
+      "speakable": { "@type": "SpeakableSpecification", "cssSelector": ["h1", "[data-speakable]"] }
+    }
+    </script>
+
+    <!-- JSON-LD: NewsMediaOrganization (Authority) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "NewsMediaOrganization",
+      "name": "GearUpToFit",
+      "url": "https://gearuptofit.com",
+      "logo": "https://gearuptofit.com/wp-content/uploads/2023/03/cropped-Grey-Black-Illustration-Gym-Fitness-Logo.png",
+      "foundingDate": "2023",
+      "knowsAbout": ["Running", "Strength Training", "Nutrition", "Sports Science", "Fitness Gear", "Smartwatches", "Macro Tracking", "TDEE", "BMI", "Marathon Training"],
+      "publishingPrinciples": "https://gearuptofit.com/editorial-policy/"
     }
     </script>
   </head>

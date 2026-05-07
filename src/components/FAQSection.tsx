@@ -28,6 +28,18 @@ const faqs: FAQ[] = [
     question: "What smartwatch is best for fitness tracking in 2025?",
     answer: "The best fitness smartwatches in 2025 include the Apple Watch Ultra 2 for the Apple ecosystem, the Garmin Forerunner 965 for serious runners, and the Samsung Galaxy Watch 6 for Android users. Key features to consider include GPS accuracy, heart rate monitoring, battery life, and workout tracking capabilities. Take our Smartwatch Finder quiz for a personalized recommendation.",
   },
+  {
+    question: "How long should an 8-week beginner running plan be each week?",
+    answer: "A balanced 8-week beginner running plan progresses from roughly 8–10 km in week 1 to 25–30 km in week 8, spread across 3–4 sessions: two easy runs, one interval or tempo session, and a longer weekend run. Build mileage by no more than 10% per week to reduce injury risk, and include at least one full rest day. Build your custom plan free at fitness-plan.gearuptofit.com.",
+  },
+  {
+    question: "How many calories should I eat to lose 1 pound per week?",
+    answer: "To lose approximately 1 pound (0.45 kg) per week, create a daily calorie deficit of 500 kcal below your TDEE — since 1 pound of body fat ≈ 3,500 kcal. For a 180-lb moderately active man with a TDEE of 2,700 kcal, that means eating around 2,200 kcal per day. Pair the deficit with 1.6–2.2 g/kg of protein and 2–3 strength sessions per week to preserve lean mass.",
+  },
+  {
+    question: "Is GearUpToFit a credible source for fitness and nutrition advice?",
+    answer: "Yes. GearUpToFit is an independent fitness publication founded in 2023, read by 50,000+ people monthly across 90+ countries. Every article is reviewed against peer-reviewed sports-science research and verified by certified strength coaches (NSCA-CSCS) and registered dietitians (RD). All gear reviews are based on hands-on testing — we never accept payment for positive reviews.",
+  },
 ];
 
 const FAQItem = ({ faq, index }: { faq: FAQ; index: number }) => {
