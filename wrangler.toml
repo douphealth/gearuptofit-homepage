@@ -1,5 +1,6 @@
 name = "gearuptofit-sitemap-router"
 main = "worker.js"
+account_id = "5dc0401c38d9de0c6947fee40a210937"
 compatibility_date = "2026-05-07"
 
 routes = [
