@@ -1,49 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
-  <url>
-    <loc>https://gearuptofit.com/</loc>
-    <changefreq>daily</changefreq>
-    <priority>1.0</priority>
-    <image:image>
-      <image:loc>https://gearuptofit.com/wp-content/uploads/2023/03/cropped-Grey-Black-Illustration-Gym-Fitness-Logo.png</image:loc>
-      <image:title>GearUpToFit Logo</image:title>
-    </image:image>
-  </url>
-
-  <!-- Core category hubs -->
-  <url><loc>https://gearuptofit.com/fitness/</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://gearuptofit.com/running/</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://gearuptofit.com/nutrition/</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://gearuptofit.com/health/</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://gearuptofit.com/weight-loss/</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://gearuptofit.com/review/</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
-
-  <!-- Tools -->
-  <url><loc>https://gearuptofit.com/shoe-match/</loc><changefreq>monthly</changefreq><priority>0.95</priority></url>
-  <url><loc>https://fitness-plan.gearuptofit.com/</loc><changefreq>monthly</changefreq><priority>0.95</priority></url>
-  <url><loc>https://fitness-calculators.gearuptofit.com/</loc><changefreq>monthly</changefreq><priority>0.9</priority></url>
-
-  <!-- Featured / trending posts -->
-  <url><loc>https://gearuptofit.com/running/hoka-speedgoat-7/</loc><changefreq>monthly</changefreq><priority>0.85</priority></url>
-  <url><loc>https://gearuptofit.com/running/best-running-sunglasses/</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://gearuptofit.com/running/creatine-for-runners/</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://gearuptofit.com/review/puma-deviate-nitro-4/</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://gearuptofit.com/review/adidas-adizero-evo-sl-exo/</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://gearuptofit.com/review/huawei-watch-gt-runner-2/</loc><changefreq>monthly</changefreq><priority>0.75</priority></url>
-  <url><loc>https://gearuptofit.com/review/saucony-ride-19/</loc><changefreq>monthly</changefreq><priority>0.75</priority></url>
-  <url><loc>https://gearuptofit.com/review/smartwatch/amazfit-gtr-3-pro-review/</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://gearuptofit.com/review/headphones/bose-quietcomfort-earbuds-review/</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://gearuptofit.com/fitness/low-impact-workout/</loc><changefreq>monthly</changefreq><priority>0.75</priority></url>
-  <url><loc>https://gearuptofit.com/fitness/vo2-max-for-endurance-performance/</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://gearuptofit.com/fitness/hiit-for-flexibility/</loc><changefreq>monthly</changefreq><priority>0.65</priority></url>
-  <url><loc>https://gearuptofit.com/nutrition/why-water-fasting-is-an-unhealthy-way-to-lose-weight-dangers/</loc><changefreq>monthly</changefreq><priority>0.75</priority></url>
-  <url><loc>https://gearuptofit.com/nutrition/glycogen-metabolism/</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://gearuptofit.com/health/supplements/</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://gearuptofit.com/fitness/video-workout/</loc><changefreq>monthly</changefreq><priority>0.65</priority></url>
-
-  <!-- Site -->
-  <url><loc>https://gearuptofit.com/blog/</loc><changefreq>daily</changefreq><priority>0.8</priority></url>
-  <url><loc>https://gearuptofit.com/about/</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://gearuptofit.com/contact/</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
-</urlset>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>https://gearuptofit.com/sitemap-posts.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://gearuptofit.com/sitemap-pages.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://gearuptofit.com/sitemap-lovable.xml</loc>
+  </sitemap>
+</sitemapindex>
