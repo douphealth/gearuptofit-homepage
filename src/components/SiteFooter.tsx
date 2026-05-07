@@ -52,7 +52,7 @@ const SiteFooter = () => {
             </h4>
             <ul className="space-y-2">
               <li>
-                <a href="https://shoe-match.gearuptofit.com/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                <a href="https://gearuptofit.com/shoe-match/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
                   Shoe Finder Tool
                 </a>
               </li>

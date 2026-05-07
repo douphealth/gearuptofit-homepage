@@ -54,7 +54,7 @@ const ToolsSection = () => {
         {/* New Featured Tools */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
           <motion.a
-            href="https://shoe-match.gearuptofit.com/"
+            href="https://gearuptofit.com/shoe-match/"
             target="_blank"
             rel="noopener noreferrer"
             initial={{ opacity: 0, y: 16, filter: "blur(4px)" }}
