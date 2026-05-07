@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:dev": "vite build --mode development",
-    "deploy:worker": "wrangler deploy worker.js && curl -fsSI https://gearuptofit.com/sitemap-posts.xml | grep -i 'x-url-count'",
+    "deploy:worker": "node scripts/deploy-cloudflare-worker.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
