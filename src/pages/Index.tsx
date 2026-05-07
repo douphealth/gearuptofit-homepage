@@ -4,6 +4,7 @@ import LiveTicker from "@/components/LiveTicker";
 import FitnessQuiz from "@/components/FitnessQuiz";
 import CategoryPillars from "@/components/CategoryPillars";
 import FeaturedArticle from "@/components/FeaturedArticle";
+import LatestFromBlog from "@/components/LatestFromBlog";
 import TrendingSection from "@/components/TrendingSection";
 import DeepDiveSection from "@/components/DeepDiveSection";
 import CalculatorsHub from "@/components/CalculatorsHub";
@@ -25,6 +26,7 @@ const Index = () => {
             <CategoryPillars />
           </nav>
           <FeaturedArticle />
+          <LatestFromBlog />
           <TrendingSection />
           <DeepDiveSection />
           <CalculatorsHub />
