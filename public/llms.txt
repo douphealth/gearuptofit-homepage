@@ -17,7 +17,7 @@
 - Fitness Calculators: https://gearuptofit.com/calculators/
 
 ## Interactive Tools
-- Running Shoe Finder (9-question quiz): https://shoe-match.gearuptofit.com/
+- Running Shoe Finder (9-question quiz): https://gearuptofit.com/shoe-match/
 - 8-Week Custom Training Plan Builder: https://fitness-plan.gearuptofit.com/
 - Free Fitness Calculators (BMI, TDEE, Macro, Body Fat, BMR): https://fitness-calculators.gearuptofit.com/
 
