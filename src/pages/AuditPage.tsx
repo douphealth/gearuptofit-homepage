@@ -727,7 +727,7 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
           )}
 
           {!fixes && (
-            <Button onClick={generate} disabled={busy} className="w-full">
+            <Button onClick={() => generate(false)} disabled={busy} className="w-full">
               {busy ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
               Generate AI fixes
             </Button>
@@ -735,18 +735,28 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
 
           {fixes && (
             <div className="space-y-3">
-              <FixBlock label="Meta title" value={fixes.metaTitle} />
-              <FixBlock label="Meta description" value={fixes.metaDescription} />
-              <FixBlock label="Intro paragraph" value={fixes.introParagraph} />
-              {fixes.h2Outline && <FixBlock label="H2 outline" value={fixes.h2Outline.join("\n")} />}
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => generate(true)} disabled={busy}>
+                  {busy ? <Loader2 className="size-4 animate-spin mr-2" /> : <RefreshCw className="size-4 mr-2" />}
+                  Regenerate
+                </Button>
+              </div>
+              <FixBlock label="Primary keyword" value={fixes.primaryKeyword || "—"} />
+              <FixBlock label="Meta title" value={fixes.metaTitle || ""} />
+              <FixBlock label="Meta description" value={fixes.metaDescription || ""} />
+              {fixes.introHtml && <FixBlock label="Intro (HTML, ready to inject)" value={fixes.introHtml} mono />}
+              {!fixes.introHtml && fixes.introParagraph && <FixBlock label="Intro" value={fixes.introParagraph} />}
+              {fixes.h2Outline && <FixBlock label="H2 outline" value={(fixes.h2Outline || []).join("\n")} />}
+              {fixes.faqHtml && <FixBlock label="FAQ HTML (full overhaul block)" value={fixes.faqHtml} mono />}
               {fixes.faq && (
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">FAQ ({fixes.faq.length})</CardTitle></CardHeader>
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm">FAQ preview ({fixes.faq.length})</CardTitle></CardHeader>
                   <CardContent className="space-y-2 text-sm">
                     {fixes.faq.map((f: any, i: number) => (
                       <div key={i}><div className="font-medium">{f.q}</div><div className="text-muted-foreground">{f.a}</div></div>
                     ))}
                   </CardContent></Card>
               )}
+              {fixes.conclusionHtml && <FixBlock label="Bottom Line / Conclusion HTML" value={fixes.conclusionHtml} mono />}
               {fixes.internalLinks && (
                 <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Internal links</CardTitle></CardHeader>
                   <CardContent className="space-y-1 text-sm">
@@ -757,12 +767,25 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
               )}
               {fixes.jsonLd && <FixBlock label="JSON-LD schema" value={JSON.stringify(fixes.jsonLd, null, 2)} mono />}
 
-              <Button onClick={pushDraft} disabled={pushing} className="w-full" variant="default">
+              <Button onClick={fullOverhaul} disabled={pushing} className="w-full" variant="destructive">
+                {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
+                FULL OVERHAUL — apply all to live post
+              </Button>
+              {overhaulResult && (
+                <div className="text-xs p-3 border rounded-md bg-emerald-500/10">
+                  <div className="font-medium text-emerald-500 mb-1">Overhaul applied</div>
+                  <div className="text-muted-foreground">{overhaulResult.message}</div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {overhaulResult.changes.map((c, i) => <Badge key={i} variant="secondary">{c}</Badge>)}
+                  </div>
+                </div>
+              )}
+              <Button onClick={pushDraft} disabled={pushing} className="w-full" variant="outline">
                 {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Send className="size-4 mr-2" />}
-                Push title + suggestions to WordPress
+                Safe push (title + suggestions only)
               </Button>
               <p className="text-xs text-muted-foreground text-center">
-                Safe: only title/excerpt update. Intro, FAQ, and JSON-LD are stored in post meta — apply them inside the wp-admin block editor to keep &lt;style&gt; and &lt;script&gt; tags intact.
+                Full Overhaul writes intro/FAQ/conclusion/JSON-LD/responsive CSS directly to live content. Idempotent (safe to re-run). Safe push only updates title/excerpt.
               </p>
             </div>
           )}
