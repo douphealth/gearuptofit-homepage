@@ -136,7 +136,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => load(true)} disabled={loading}>
-            <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} /> Refresh WP
+            <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} /> {progress || "Refresh WP"}
           </Button>
           <Button size="sm" onClick={runScan} disabled={scanning}>
             <Sparkles className={`size-4 mr-2 ${scanning ? "animate-spin" : ""}`} /> Re-score all
