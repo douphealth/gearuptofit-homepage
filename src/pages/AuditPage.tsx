@@ -276,7 +276,7 @@ function Stat({ label, value, className = "" }: { label: string; value: number |
   );
 }
 
-type LeakItem = { post_id: number; link: string; title: string };
+type LeakItem = { post_id: number; link: string; title: string; sample?: string };
 type FixResult = { post_id: number; ok: boolean; removed_chars?: number; error?: string };
 
 function BulkCleanupPanel() {
