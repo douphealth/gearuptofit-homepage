@@ -316,7 +316,7 @@ function BulkCleanupPanel() {
       const ids = items.map((i) => i.post_id);
       const all: FixResult[] = [];
       for (let i = 0; i < ids.length; i += 1) {
-        setStatus(`Cleaning ${i + 1}/${ids.length} · post ${ids[i]}`);
+        setStatus(`Cleaning ${i + 1}/${ids.length} · snippet ${ids[i]}`);
         const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]] });
         all.push(...r.results);
         setResults([...all]);
