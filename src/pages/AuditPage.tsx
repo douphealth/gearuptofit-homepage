@@ -336,16 +336,16 @@ function BulkCleanupPanel() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <CardTitle className="text-base">Site-wide CSS leak cleanup</CardTitle>
-            <p className="text-xs text-muted-foreground mt-1">Scans published Elementor snippets for raw <code>.gutf-article {`{...}`}</code> CSS that is missing a <code>&lt;style&gt;</code> wrapper, then drafts the offending global snippet. This fixes the source instead of re-saving posts.</p>
+            <p className="text-xs text-muted-foreground mt-1">Scans every published post for orphan CSS rendered as visible text (the <code>.gutf-article {`{ ... !important }`}</code> block at the top of posts). The fix re-wraps the orphan CSS in a single <code>&lt;style&gt;</code> tag inside the post — preserving the design, removing the visible leak.</p>
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={scan} disabled={scanning || fixing}>
               {scanning ? <Loader2 className="size-4 animate-spin mr-2" /> : <RefreshCw className="size-4 mr-2" />}
-              {scanning && status ? status : "Scan CSS snippets"}
+              {scanning && status ? status : "Scan all posts"}
             </Button>
             <Button size="sm" variant="destructive" onClick={fixAll} disabled={fixing || scanning || !items || items.length === 0}>
               {fixing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
-              {fixing && status ? status : `Fix ${items?.length ?? 0} snippets`}
+              {fixing && status ? status : `Fix ${items?.length ?? 0} posts`}
             </Button>
           </div>
         </div>
