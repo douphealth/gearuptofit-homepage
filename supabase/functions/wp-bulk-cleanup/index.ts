@@ -155,10 +155,7 @@ Deno.serve(async (req) => {
   }
 
   // ── FIX ──────────────────────────────────────────────────────────────
-  // Because the leak is injected by theme/Elementor render and is not in
-  // post.content, we can't surgically fix it from REST content. As a best
-  // effort, we re-save the post (forces WP to re-process content) which
-  // sometimes flushes broken caches. We log every attempt.
+  // Fix the actual global source by drafting the offending Elementor snippets.
   if (mode === "fix") {
     const user = Deno.env.get("WP_USERNAME");
     const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
@@ -173,30 +170,34 @@ Deno.serve(async (req) => {
 
     for (const id of limited) {
       try {
-        // Re-save with same content to bust render cache.
-        const getRes = await fetch(`${WP_BASE}/posts/${id}?_fields=id,content&context=edit`, {
+        const getRes = await fetch(`${WP_BASE}/elementor_snippet/${id}?context=edit&_fields=id,title,meta,status`, {
           headers: { Authorization: auth, "User-Agent": "GearupAudit/1.0" },
         });
         if (!getRes.ok) {
           await getRes.text();
-          results.push({ post_id: id, ok: false, error: `GET ${getRes.status} — fix requires manual edit (theme-injected CSS)` });
+          results.push({ post_id: id, ok: false, error: `GET snippet ${getRes.status}` });
           continue;
         }
-        const post = await getRes.json();
-        const raw = post?.content?.raw ?? post?.content?.rendered ?? "";
-        const updateRes = await fetch(`${WP_BASE}/posts/${id}`, {
+        const snippet: Snippet = await getRes.json();
+        const leak = snippetHasLeak(snippet);
+        if (!leak.found) {
+          results.push({ post_id: id, ok: true, removed_chars: 0 });
+          continue;
+        }
+        const removed = String(snippet.meta?._elementor_code || "").length;
+        const updateRes = await fetch(`${WP_BASE}/elementor_snippet/${id}`, {
           method: "POST",
           headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/1.0" },
-          body: JSON.stringify({ content: raw }),
+          body: JSON.stringify({ status: "draft" }),
         });
         if (!updateRes.ok) {
           const t = await updateRes.text();
-          results.push({ post_id: id, ok: false, error: `PUT ${updateRes.status}: ${t.slice(0, 160)}` });
+          results.push({ post_id: id, ok: false, error: `Draft snippet failed ${updateRes.status}: ${t.slice(0, 160)}` });
           continue;
         }
         await updateRes.text();
-        results.push({ post_id: id, ok: true, removed_chars: 0 });
-        await logEvent(id, "Re-saved post to bust render cache. If leak persists, source is theme/Elementor custom CSS — edit in wp-admin.");
+        results.push({ post_id: id, ok: true, removed_chars: removed });
+        await logEvent(id, `Drafted leaking Elementor snippet: ${snippetTitle(snippet)}`);
       } catch (e) {
         results.push({ post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) });
       }
