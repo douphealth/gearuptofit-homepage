@@ -646,29 +646,39 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
   const [fixes, setFixes] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [pushing, setPushing] = useState(false);
+  const [overhaulResult, setOverhaulResult] = useState<{ changes: string[]; message: string } | null>(null);
 
-  useEffect(() => { setFixes(null); }, [post?.post_id]);
+  useEffect(() => { setFixes(null); setOverhaulResult(null); }, [post?.post_id]);
 
   if (!post) return null;
 
-  const generate = async () => {
+  const generate = async (force = false) => {
     setBusy(true);
     try {
-      const r = await callAudit<{ fixes: any }>("audit-generate-fixes", { post_id: post.post_id });
+      const r = await callAudit<{ fixes: any }>("audit-generate-fixes", { post_id: post.post_id, force });
       setFixes(r.fixes);
     } catch (e: any) { toast({ title: "AI failed", description: e.message, variant: "destructive" }); }
     setBusy(false);
   };
 
-  const pushDraft = async () => {
-    if (!fixes) return;
-    if (!confirm("Push AI suggestions to WordPress?\n\nSAFE MODE: only the post title and excerpt are updated. The full intro/FAQ/JSON-LD bundle is stored in post meta `_gutf_ai_suggestions` for you to apply manually inside the wp-admin block editor (this preserves <style>/<script> tags). The live content is NOT changed.")) return;
+  const fullOverhaul = async () => {
+    if (!fixes) { toast({ title: "Generate AI fixes first" }); return; }
+    if (!confirm(`FULL OVERHAUL — applies all changes to LIVE post ${post.post_id}:\n\n• Wraps tables/iframes for mobile responsiveness\n• Strips fixed pixel widths\n• Adds lazy-loading to images\n• Injects intro, FAQ section, conclusion (idempotent — safe to re-run)\n• Adds JSON-LD schema\n• Adds responsive CSS guard\n• Updates meta title + description\n\nProceed?`)) return;
     setPushing(true);
     try {
-      const r = await callAudit<{ draft_url: string; message: string }>("wp-push-draft", {
-        post_id: post.post_id,
-        fixes,
-      });
+      const r = await callAudit<{ ok: boolean; changes: string[]; message: string }>("wp-overhaul", { post_id: post.post_id, fixes });
+      setOverhaulResult({ changes: r.changes || [], message: r.message || "" });
+      toast({ title: r.ok ? `Overhauled post ${post.post_id}` : "Overhaul failed", description: r.message });
+    } catch (e: any) { toast({ title: "Overhaul failed", description: e.message, variant: "destructive" }); }
+    setPushing(false);
+  };
+
+  const pushDraft = async () => {
+    if (!fixes) return;
+    if (!confirm("SAFE PUSH: only title/excerpt update + suggestions stored in post meta. Use Full Overhaul to inject FAQ/intro/conclusion/schema directly.")) return;
+    setPushing(true);
+    try {
+      const r = await callAudit<{ draft_url: string; message: string }>("wp-push-draft", { post_id: post.post_id, fixes });
       toast({ title: "Draft pushed", description: r.message });
       if (r.draft_url) window.open(r.draft_url, "_blank");
     } catch (e: any) { toast({ title: "Push failed", description: e.message, variant: "destructive" }); }
@@ -676,13 +686,10 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
   };
 
   const revertDraft = async () => {
-    if (!confirm("Revert this post's draft to match the current LIVE content? Use this if a previous push corrupted the draft (e.g. raw CSS showing). The live post is NOT changed.")) return;
+    if (!confirm("Revert this post's draft to match the current LIVE content?")) return;
     setPushing(true);
     try {
-      const r = await callAudit<{ ok: boolean; message?: string }>("wp-push-draft", {
-        post_id: post.post_id,
-        mode: "revert",
-      });
+      const r = await callAudit<{ ok: boolean; message?: string }>("wp-push-draft", { post_id: post.post_id, mode: "revert" });
       toast({ title: r.ok ? "Draft reverted" : "Revert failed", description: r.message || "" });
     } catch (e: any) { toast({ title: "Revert failed", description: e.message, variant: "destructive" }); }
     setPushing(false);
