@@ -647,8 +647,11 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
   const [busy, setBusy] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [overhaulResult, setOverhaulResult] = useState<{ changes: string[]; message: string } | null>(null);
+  const [linkSugs, setLinkSugs] = useState<any[] | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkApplied, setLinkApplied] = useState<{ applied: number; links: any[] } | null>(null);
 
-  useEffect(() => { setFixes(null); setOverhaulResult(null); }, [post?.post_id]);
+  useEffect(() => { setFixes(null); setOverhaulResult(null); setLinkSugs(null); setLinkApplied(null); }, [post?.post_id]);
 
   if (!post) return null;
 
@@ -695,6 +698,32 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
     setPushing(false);
   };
 
+  const fetchLinkSuggestions = async () => {
+    setLinkBusy(true);
+    try {
+      const r = await callAudit<{ suggestions: any[] }>("audit-link-optimizer", { mode: "suggest", post_id: post.post_id, max: 8 });
+      setLinkSugs(r.suggestions || []);
+      if (!r.suggestions?.length) toast({ title: "No link opportunities found" });
+    } catch (e: any) { toast({ title: "Link optimizer failed", description: e.message, variant: "destructive" }); }
+    setLinkBusy(false);
+  };
+
+  const applyLinks = async () => {
+    if (!linkSugs?.length) return;
+    if (!confirm(`Insert ${linkSugs.length} internal link(s) directly into LIVE post ${post.post_id}? Idempotent — re-running won't duplicate.`)) return;
+    setLinkBusy(true);
+    try {
+      const r = await callAudit<{ applied: number; links: any[] }>("audit-link-optimizer", {
+        mode: "apply", post_id: post.post_id, suggestions: linkSugs, max: linkSugs.length,
+      });
+      setLinkApplied({ applied: r.applied, links: r.links });
+      toast({ title: `Inserted ${r.applied} link(s)`, description: r.links.map((l: any) => l.anchor).join(", ") });
+    } catch (e: any) { toast({ title: "Apply failed", description: e.message, variant: "destructive" }); }
+    setLinkBusy(false);
+  };
+
+  const cwv = (score?.metrics as any)?.cwv;
+
   return (
     <Sheet open={!!post} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
@@ -725,6 +754,93 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
               </CardContent>
             </Card>
           )}
+
+          {cwv && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  Core Web Vitals
+                  <Badge variant={cwv.score >= 80 ? "default" : cwv.score >= 60 ? "secondary" : "destructive"}>
+                    {cwv.score}/100
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-xs grid grid-cols-3 gap-3">
+                <div>
+                  <div className="font-semibold mb-1">LCP</div>
+                  <div className="text-muted-foreground">Hero priority: {cwv.lcp?.heroFetchPriority ? "✓" : "✗"}</div>
+                  <div className="text-muted-foreground">Hero lazy: {cwv.lcp?.heroLazy ? "⚠ yes" : "✓ no"}</div>
+                  <div className="text-muted-foreground">Format: {cwv.lcp?.heroFormat}</div>
+                  <div className="text-muted-foreground">Eager above-fold: {cwv.lcp?.eagerAboveFold}</div>
+                </div>
+                <div>
+                  <div className="font-semibold mb-1">CLS</div>
+                  <div className="text-muted-foreground">Imgs no-dims: {cwv.cls?.imagesMissingDims}</div>
+                  <div className="text-muted-foreground">Iframes no-dims: {cwv.cls?.iframesMissingDims}</div>
+                  <div className="text-muted-foreground">Ads no-reserve: {cwv.cls?.adsWithoutReserve}</div>
+                </div>
+                <div>
+                  <div className="font-semibold mb-1">INP</div>
+                  <div className="text-muted-foreground">Inline scripts: {cwv.inp?.inlineScripts}</div>
+                  <div className="text-muted-foreground">Heavy: {cwv.inp?.heavyInlineScripts}</div>
+                  <div className="text-muted-foreground">Blocking: {cwv.inp?.blockingScripts}</div>
+                  <div className="text-muted-foreground">DOM nodes: {cwv.domNodes}</div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Internal linking optimizer</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!linkSugs && (
+                <Button onClick={fetchLinkSuggestions} disabled={linkBusy} size="sm" className="w-full" variant="outline">
+                  {linkBusy ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+                  Find best internal links
+                </Button>
+              )}
+              {linkSugs && linkSugs.length > 0 && (
+                <>
+                  <div className="space-y-2">
+                    {linkSugs.map((s, i) => (
+                      <div key={i} className="text-xs p-2 border rounded-md">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge variant="secondary">{(s.relevance * 100).toFixed(0)}%</Badge>
+                          <span className="font-medium truncate">{s.anchor}</span>
+                          <span className="text-muted-foreground">→</span>
+                          <a className="text-primary truncate" href={s.targetUrl} target="_blank" rel="noreferrer">{s.targetTitle}</a>
+                        </div>
+                        <div className="text-muted-foreground italic truncate">{s.contextSnippet}</div>
+                        <div className="text-muted-foreground">{s.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={fetchLinkSuggestions} disabled={linkBusy} size="sm" variant="outline">
+                      <RefreshCw className="size-4 mr-1" /> Refresh
+                    </Button>
+                    <Button onClick={applyLinks} disabled={linkBusy} size="sm" className="flex-1">
+                      {linkBusy ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+                      Apply {linkSugs.length} link(s) to live post
+                    </Button>
+                  </div>
+                </>
+              )}
+              {linkSugs && linkSugs.length === 0 && (
+                <p className="text-xs text-muted-foreground">No high-confidence link opportunities — content already well-linked or no topical matches.</p>
+              )}
+              {linkApplied && (
+                <div className="text-xs p-2 rounded-md bg-emerald-500/10 border">
+                  <div className="font-medium text-emerald-500">Inserted {linkApplied.applied} link(s)</div>
+                  {linkApplied.links.map((l, i) => (
+                    <div key={i} className="text-muted-foreground">→ {l.anchor}</div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {!fixes && (
             <Button onClick={() => generate(false)} disabled={busy} className="w-full">
