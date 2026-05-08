@@ -384,6 +384,19 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
     setPushing(false);
   };
 
+  const revertDraft = async () => {
+    if (!confirm("Revert this post's draft to match the current LIVE content? Use this if a previous push corrupted the draft (e.g. raw CSS showing). The live post is NOT changed.")) return;
+    setPushing(true);
+    try {
+      const r = await callAudit<{ ok: boolean; message?: string }>("wp-push-draft", {
+        post_id: post.post_id,
+        mode: "revert",
+      });
+      toast({ title: r.ok ? "Draft reverted" : "Revert failed", description: r.message || "" });
+    } catch (e: any) { toast({ title: "Revert failed", description: e.message, variant: "destructive" }); }
+    setPushing(false);
+  };
+
   return (
     <Sheet open={!!post} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
