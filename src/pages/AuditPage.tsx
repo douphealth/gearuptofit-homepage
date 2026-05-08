@@ -291,17 +291,18 @@ function BulkCleanupPanel() {
     try {
       const all: LeakItem[] = [];
       let page = 1;
-      while (true) {
-        const r = await callAudit<{ count: number; affected: LeakItem[]; done: boolean; totalPages: number }>(
+      let totalPages = 1;
+      while (page <= 100) {
+        const r = await callAudit<{ count: number; affected: LeakItem[]; done: boolean; totalPages: number; page: number }>(
           "wp-bulk-cleanup",
-          { mode: "scan" },
+          { mode: "scan", page },
         );
+        totalPages = r.totalPages || totalPages;
         all.push(...r.affected);
         setItems([...all]);
-        setStatus(`Scanned CSS snippets · ${all.length} affected`);
+        setStatus(`Scanned page ${page}/${totalPages} · ${all.length} affected`);
         if (r.done) break;
         page++;
-        if (page > 5000) break;
       }
       toast({ title: `Scan complete`, description: `${all.length} posts contain leaked CSS.` });
     } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
@@ -310,19 +311,19 @@ function BulkCleanupPanel() {
 
   const fixAll = async () => {
     if (!items || items.length === 0) return;
-      if (!confirm(`Disable ${items.length} leaking Elementor snippet(s)? This fixes the global source that prints CSS at the top of posts. It does not edit blog post content.`)) return;
+    if (!confirm(`Re-wrap orphan CSS in ${items.length} post(s)? The orphan CSS that currently shows as visible text at the top of these posts will be moved back inside a single <style> tag. Live posts are updated in place.`)) return;
     setFixing(true);
     try {
       const ids = items.map((i) => i.post_id);
       const all: FixResult[] = [];
       for (let i = 0; i < ids.length; i += 1) {
-        setStatus(`Cleaning ${i + 1}/${ids.length} · snippet ${ids[i]}`);
+        setStatus(`Fixing ${i + 1}/${ids.length} · post ${ids[i]}`);
         const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]] });
         all.push(...r.results);
         setResults([...all]);
       }
       setResults(all);
-      const ok = all.filter((r) => r.ok && (r.removed_chars ?? 0) > 0).length;
+      const ok = all.filter((r) => r.ok).length;
       const failed = all.filter((r) => !r.ok).length;
       toast({ title: `Cleanup done`, description: `${ok} fixed, ${failed} failed.` });
     } catch (e: any) { toast({ title: "Cleanup failed", description: e.message, variant: "destructive" }); }
