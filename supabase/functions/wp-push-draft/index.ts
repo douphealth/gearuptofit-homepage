@@ -2,6 +2,16 @@ import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
 
 const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
+const DETAIL_FIELDS = "id,content";
+
+async function fetchOriginalContent(postId: number) {
+  const r = await fetch(`${WP_BASE}/posts/${postId}?_fields=${DETAIL_FIELDS}`, {
+    headers: { "User-Agent": "GearupAudit/1.0" },
+  });
+  if (!r.ok) return "";
+  const data = await r.json();
+  return data?.content?.rendered || "";
+}
 
 async function checkAuth(req: Request): Promise<boolean> {
   let body: any = {};
@@ -35,9 +45,7 @@ Deno.serve(async (req) => {
   }
   const auth = "Basic " + btoa(`${user}:${pass.replace(/\s+/g, "")}`);
 
-  // Fetch original content from cache
-  const { data: cached } = await supabase.from("wp_posts_cache").select("data").eq("post_id", post_id).maybeSingle();
-  const original = (cached?.data as any)?.content?.rendered || "";
+  const original = await fetchOriginalContent(Number(post_id));
 
   const faqHtml = (fixes.faq || []).map((f: any) => `<h3>${f.q}</h3><p>${f.a}</p>`).join("\n");
   const jsonLd = fixes.jsonLd ? `<script type="application/ld+json">${JSON.stringify(fixes.jsonLd)}</script>` : "";

@@ -108,10 +108,18 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const runScan = async () => {
     setScanning(true);
     try {
-      const r = await callAudit<{ scanned: number; avgScore: number }>("audit-score", {});
-      toast({ title: `Scanned ${r.scanned} posts`, description: `Avg score ${r.avgScore}` });
+      let scanned = 0;
+      const batchSize = 5;
+      for (let i = 0; i < posts.length; i += batchSize) {
+        const batch = posts.slice(i, i + batchSize).map((p) => p.post_id);
+        setProgress(`Scoring ${Math.min(i + batchSize, posts.length)}/${posts.length}…`);
+        const r = await callAudit<{ scanned: number }>("audit-score", { post_ids: batch });
+        scanned += r.scanned || 0;
+      }
+      toast({ title: `Scanned ${scanned} posts`, description: "Scores updated in safe batches" });
       await load();
     } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
+    setProgress("");
     setScanning(false);
   };
 
@@ -146,7 +154,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} /> {progress || "Refresh WP"}
           </Button>
           <Button size="sm" onClick={runScan} disabled={scanning}>
-            <Sparkles className={`size-4 mr-2 ${scanning ? "animate-spin" : ""}`} /> Re-score all
+            <Sparkles className={`size-4 mr-2 ${scanning ? "animate-spin" : ""}`} /> {scanning && progress ? progress : "Re-score all"}
           </Button>
           <Button variant="ghost" size="sm" onClick={onLogout}><LogOut className="size-4" /></Button>
         </div>

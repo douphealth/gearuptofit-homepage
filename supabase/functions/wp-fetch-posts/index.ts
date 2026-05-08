@@ -3,8 +3,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
 
 const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
 const TTL_MIN = 15;
-const PER_PAGE = 10;
-const FIELDS = "id,slug,link,title,excerpt,content,modified_gmt,date_gmt,categories,tags,author,yoast_head_json";
+const PER_PAGE = 100;
+const FIELDS = "id,slug,link,title,modified_gmt,date_gmt";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -38,17 +38,24 @@ Deno.serve(async (req) => {
           const { data: posts } = await supabase
             .from("wp_posts_cache")
             .select("post_id, slug, title, link, modified_at")
-            .order("modified_at", { ascending: false });
+            .order("modified_at", { ascending: false })
+            .range(0, 4999);
           return new Response(JSON.stringify({ cached: true, posts, totalPages: 0, done: true }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
       }
     }
-    // Probe page 1 to get totalPages
+    // Probe page 1 to get totalPages without downloading post bodies.
     const probe = await fetch(`${WP_BASE}/posts?per_page=${PER_PAGE}&page=1&status=publish&_fields=id`, {
       headers: { "User-Agent": "GearupAudit/1.0" },
     });
+    if (!probe.ok) {
+      await probe.text();
+      return new Response(JSON.stringify({ error: `WP probe failed: ${probe.status}` }), {
+        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const totalPages = parseInt(probe.headers.get("x-wp-totalpages") || "1", 10);
     await probe.text();
     return new Response(JSON.stringify({ totalPages, perPage: PER_PAGE, needsFetch: true }), {
@@ -76,7 +83,14 @@ Deno.serve(async (req) => {
       title: typeof p.title === "object" ? p.title.rendered : String(p.title ?? ""),
       link: p.link,
       modified_at: p.modified_gmt ? new Date(p.modified_gmt + "Z").toISOString() : null,
-      data: p,
+      data: {
+        id: p.id,
+        slug: p.slug,
+        link: p.link,
+        title: p.title,
+        modified_gmt: p.modified_gmt,
+        date_gmt: p.date_gmt,
+      },
       fetched_at: fetchedAt,
     }));
     if (rows.length > 0) {
@@ -92,7 +106,8 @@ Deno.serve(async (req) => {
     const { data: posts } = await supabase
       .from("wp_posts_cache")
       .select("post_id, slug, title, link, modified_at")
-      .order("modified_at", { ascending: false });
+      .order("modified_at", { ascending: false })
+      .range(0, 4999);
     return new Response(JSON.stringify({ posts }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

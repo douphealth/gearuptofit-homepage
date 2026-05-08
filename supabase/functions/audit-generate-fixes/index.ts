@@ -12,6 +12,16 @@ const SYSTEM = `You are an elite SEO/AEO/GEO editor for gearuptofit.com (fitness
 Return STRICT JSON only matching the requested schema. No prose outside JSON.
 Goals: Google rankings + AI Overviews + ChatGPT/Perplexity citations.
 Tone: authoritative, scannable, practical. Use specific numbers and citations.`;
+const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
+const DETAIL_FIELDS = "id,slug,link,title,excerpt,content,modified_gmt,date_gmt,categories,tags,author,yoast_head_json";
+
+async function fetchPostDetails(postId: number) {
+  const r = await fetch(`${WP_BASE}/posts/${postId}?_fields=${DETAIL_FIELDS}`, {
+    headers: { "User-Agent": "GearupAudit/1.0" },
+  });
+  if (!r.ok) return null;
+  return await r.json();
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -44,7 +54,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "Post not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  const data: any = post.data;
+  const data: any = await fetchPostDetails(Number(post_id)) || post.data;
   const title = (data?.title?.rendered || post.title || "").replace(/<[^>]+>/g, "");
   const html = data?.content?.rendered || "";
   const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 8000);
