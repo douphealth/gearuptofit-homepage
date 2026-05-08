@@ -91,12 +91,19 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       if (force) {
         const runId = state.run?.id;
         if (!runId) throw new Error("Import run could not start");
+        const attempts: Record<number, number> = {};
         while (state.firstMissingPage) {
+          const page = state.firstMissingPage;
           const total = state.authoritative?.totalPages || state.run?.expected_pages || "?";
-          setProgress(`Fetching page ${state.firstMissingPage}/${total}…`);
-          state = await callAudit<Diagnostics & { done?: boolean }>("wp-fetch-posts", { mode: "continue", run_id: runId });
+          attempts[page] = (attempts[page] || 0) + 1;
+          setProgress(`Fetching page ${page}/${total} · try ${attempts[page]}…`);
+          try {
+            state = await callAudit<Diagnostics & { done?: boolean }>("wp-fetch-posts", { mode: "continue", run_id: runId });
+          } catch (err) {
+            state = await callAudit<Diagnostics>("wp-fetch-posts", { mode: "diagnostics", run_id: runId });
+          }
           setDiagnostics(state);
-          if (state.run?.status === "failed") break;
+          if (attempts[page] >= 3 && state.firstMissingPage === page) break;
         }
       }
       setProgress("Loading…");
@@ -116,11 +123,18 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       let state = await callAudit<Diagnostics>("wp-fetch-posts", { mode: "retry", run_id: diagnostics?.run?.id });
       setDiagnostics(state);
       const runId = state.run?.id;
+      const attempts: Record<number, number> = {};
       while (runId && state.firstMissingPage) {
-        setProgress(`Retrying page ${state.firstMissingPage}/${state.authoritative?.totalPages || "?"}…`);
-        state = await callAudit<Diagnostics>("wp-fetch-posts", { mode: "continue", run_id: runId });
+        const page = state.firstMissingPage;
+        attempts[page] = (attempts[page] || 0) + 1;
+        setProgress(`Retrying page ${page}/${state.authoritative?.totalPages || "?"} · try ${attempts[page]}…`);
+        try {
+          state = await callAudit<Diagnostics>("wp-fetch-posts", { mode: "continue", run_id: runId });
+        } catch (err) {
+          state = await callAudit<Diagnostics>("wp-fetch-posts", { mode: "diagnostics", run_id: runId });
+        }
         setDiagnostics(state);
-        if (state.run?.status === "failed") break;
+        if (attempts[page] >= 3 && state.firstMissingPage === page) break;
       }
       await load(false);
     } catch (e: any) { toast({ title: "Retry failed", description: e.message, variant: "destructive" }); }
