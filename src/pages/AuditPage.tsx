@@ -61,22 +61,40 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [filter, setFilter] = useState("");
   const [sevFilter, setSevFilter] = useState<"all" | "critical" | "high">("all");
   const [selected, setSelected] = useState<Post | null>(null);
+  const [progress, setProgress] = useState<string>("");
+
+  const loadScores = async (ids: number[]) => {
+    if (!ids.length) { setScores({}); return; }
+    const { data } = await (await import("@/integrations/supabase/client")).supabase
+      .from("audit_scores").select("*").in("post_id", ids);
+    const map: Record<number, ScoreRow> = {};
+    (data || []).forEach((s: any) => { map[s.post_id] = s as ScoreRow; });
+    setScores(map);
+  };
 
   const load = async (force = false) => {
     setLoading(true);
+    setProgress("");
     try {
-      const r = await callAudit<{ posts: Post[] }>("wp-fetch-posts", force ? { force: true } : {});
-      setPosts(r.posts || []);
-      // also fetch scores via direct supabase
-      const ids = (r.posts || []).map((p) => p.post_id);
-      if (ids.length) {
-        const { data } = await (await import("@/integrations/supabase/client")).supabase
-          .from("audit_scores").select("*").in("post_id", ids);
-        const map: Record<number, ScoreRow> = {};
-        (data || []).forEach((s: any) => { map[s.post_id] = s; });
-        setScores(map);
+      const init = await callAudit<{ posts?: Post[]; totalPages?: number; needsFetch?: boolean }>(
+        "wp-fetch-posts", { mode: "list", force },
+      );
+      if (!init.needsFetch) {
+        setPosts(init.posts || []);
+        await loadScores((init.posts || []).map((p) => p.post_id));
+      } else {
+        const total = init.totalPages || 1;
+        for (let page = 1; page <= total; page++) {
+          setProgress(`Fetching ${page}/${total}…`);
+          await callAudit("wp-fetch-posts", { mode: "fetch", page });
+        }
+        setProgress("Loading…");
+        const r = await callAudit<{ posts: Post[] }>("wp-fetch-posts", { mode: "results" });
+        setPosts(r.posts || []);
+        await loadScores((r.posts || []).map((p) => p.post_id));
       }
     } catch (e: any) { toast({ title: "Load failed", description: e.message, variant: "destructive" }); }
+    setProgress("");
     setLoading(false);
   };
 
@@ -118,7 +136,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => load(true)} disabled={loading}>
-            <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} /> Refresh WP
+            <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} /> {progress || "Refresh WP"}
           </Button>
           <Button size="sm" onClick={runScan} disabled={scanning}>
             <Sparkles className={`size-4 mr-2 ${scanning ? "animate-spin" : ""}`} /> Re-score all
