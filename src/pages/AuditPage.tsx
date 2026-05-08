@@ -12,7 +12,7 @@ import {
 
 type Issue = { severity: "critical" | "high" | "polish"; code: string; message: string };
 type ScoreRow = { post_id: number; score: number; issues: Issue[]; metrics: any; scanned_at: string };
-type Post = { post_id: number; slug: string; title: string; link: string; modified_at: string; data: any };
+type Post = { post_id: number; slug: string; title: string; link: string; modified_at: string };
 
 function sevColor(s: Issue["severity"]) {
   return s === "critical" ? "destructive" : s === "high" ? "default" : "secondary";
