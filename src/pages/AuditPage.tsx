@@ -371,7 +371,7 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
 
   const pushDraft = async () => {
     if (!fixes) return;
-    if (!confirm("Push these changes as a DRAFT to WordPress? Your live post will NOT change until you publish in wp-admin.")) return;
+    if (!confirm("Push AI suggestions to WordPress?\n\nSAFE MODE: only the post title and excerpt are updated. The full intro/FAQ/JSON-LD bundle is stored in post meta `_gutf_ai_suggestions` for you to apply manually inside the wp-admin block editor (this preserves <style>/<script> tags). The live content is NOT changed.")) return;
     setPushing(true);
     try {
       const r = await callAudit<{ draft_url: string; message: string }>("wp-push-draft", {
