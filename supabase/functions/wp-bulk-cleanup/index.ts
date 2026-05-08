@@ -1,23 +1,22 @@
-// Site-wide cleanup of leaked WordPress post CSS.
+// Site-wide cleanup of leaked WordPress CSS.
 //
-// IMPORTANT: The leak is NOT inside the WP post content (REST `content.rendered`
-// returns clean content with proper <style> blocks). The leak appears only in
-// the *rendered apex HTML* (gearuptofit.com/<slug>/) — it's injected by the
-// theme/Elementor render pipeline and the <style> wrapper gets stripped
-// downstream, exposing the CSS rules as visible text.
+// Root cause: the visible `.gutf-article { ... }` text was created by globally
+// published Elementor snippets. One duplicate snippet injected the CSS without
+// a <style> wrapper, so every apex-domain post rendered the rules as text. Post
+// re-saves cannot fix this because the bad source is global snippet metadata,
+// not individual post content.
 //
-// Therefore the scanner must fetch the *rendered apex page* per post and look
-// for leak signatures appearing OUTSIDE <style>/<script> blocks. Memory stays
-// tiny by processing one post per invocation.
+// This function now scans/fixes the source: published Elementor snippets whose
+// code is raw article-layout CSS or the duplicated "Post Layout Fix" snippets.
+// It avoids full-site HTML crawling to stay below worker memory limits.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
+const WP_BASE = "https://origin.gearuptofit.com/wp-json/wp/v2";
 const APEX = "https://gearuptofit.com";
-const MAX_SCAN_PER_PAGE = 2;
 const MAX_FIX_PER_CALL = 1;
 
 const LEAK_ANCHORS = [
@@ -26,6 +25,14 @@ const LEAK_ANCHORS = [
   ".product-box-inner {",
   ".product-box-inner{",
 ];
+
+type Snippet = {
+  id: number;
+  slug?: string;
+  status?: string;
+  title?: { raw?: string; rendered?: string };
+  meta?: Record<string, unknown>;
+};
 
 function toInt(v: unknown, def: number, min: number, max: number): number {
   const n = Number(v);
