@@ -159,25 +159,8 @@ Deno.serve(async (req) => {
     if (!user || !pass) return jsonRes({ error: "WP credentials not configured" }, 500);
     const auth = "Basic " + btoa(`${user}:${pass.replace(/\s+/g, "")}`);
 
-    let ids: number[] = Array.isArray(post_ids) ? post_ids.map(Number).filter(Boolean) : [];
-    if (ids.length === 0) {
-      for (let page = 1; page <= 50 && ids.length < limit; page++) {
-        const r = await fetch(`${WP_BASE}/posts?per_page=100&page=${page}&status=publish&_fields=id,content`, {
-          headers: { "User-Agent": "GearupAudit/1.0" },
-        });
-        if (!r.ok) break;
-        const items = await r.json();
-        if (!Array.isArray(items) || items.length === 0) break;
-        for (const it of items) {
-          const noStyle = (it?.content?.rendered || "").replace(/<style[\s\S]*?<\/style>/gi, "");
-          if (LEAK_ANCHORS.some((a) => noStyle.includes(a))) {
-            ids.push(it.id);
-            if (ids.length >= limit) break;
-          }
-        }
-        if (items.length < 100) break;
-      }
-    }
+    const ids: number[] = Array.isArray(post_ids) ? post_ids.map(Number).filter(Boolean) : [];
+    if (ids.length === 0) return jsonRes({ error: "post_ids required (use mode=scan to discover)" }, 400);
 
     const results: Array<{ post_id: number; ok: boolean; removed_chars?: number; error?: string }> = [];
     for (const id of ids.slice(0, limit)) {
