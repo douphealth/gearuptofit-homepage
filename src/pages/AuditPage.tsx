@@ -190,6 +190,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         <Stat label="High issues" value={stats.high} className="text-amber-500" />
       </div>
 
+      <DiagnosticPanel diagnostics={diagnostics} loading={loading} onRetry={retryMissing} />
+
       <div className="flex flex-wrap gap-2 mb-4">
         <Input placeholder="Filter by title…" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
         {(["all", "critical", "high"] as const).map((s) => (
