@@ -38,7 +38,8 @@ Deno.serve(async (req) => {
           const { data: posts } = await supabase
             .from("wp_posts_cache")
             .select("post_id, slug, title, link, modified_at")
-            .order("modified_at", { ascending: false });
+            .order("modified_at", { ascending: false })
+            .range(0, 4999);
           return new Response(JSON.stringify({ cached: true, posts, totalPages: 0, done: true }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
@@ -105,7 +106,8 @@ Deno.serve(async (req) => {
     const { data: posts } = await supabase
       .from("wp_posts_cache")
       .select("post_id, slug, title, link, modified_at")
-      .order("modified_at", { ascending: false });
+      .order("modified_at", { ascending: false })
+      .range(0, 4999);
     return new Response(JSON.stringify({ posts }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
