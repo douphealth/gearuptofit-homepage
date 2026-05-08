@@ -276,8 +276,40 @@ function Stat({ label, value, className = "" }: { label: string; value: number |
   );
 }
 
-type LeakItem = { post_id: number; link: string; title: string; sample?: string };
+type LeakItem = { post_id: number; link: string; title: string; sample?: string; found?: boolean };
 type FixResult = { post_id: number; ok: boolean; removed_chars?: number; error?: string };
+type Verdict = {
+  verdict: "clean" | "stale_cache" | "real_leak" | "origin_only";
+  liveUrl: string; liveStatus: number; liveBytes: number;
+  live: { found: boolean; sample?: string };
+  rest: { found: boolean; sample?: string };
+  post_id: number | null;
+  cacheHeaders: Record<string, string>;
+};
+
+function downloadFile(name: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+}
+function toCsv(rows: LeakItem[], results: FixResult[] | null): string {
+  const head = ["post_id", "title", "url", "fix_status", "removed_chars", "fix_error", "sample"];
+  const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+  const lines = [head.join(",")];
+  for (const it of rows) {
+    const r = results?.find((x) => x.post_id === it.post_id);
+    lines.push([
+      it.post_id, it.title, it.link,
+      r ? (r.ok ? "fixed" : "failed") : "pending",
+      r?.removed_chars ?? "",
+      r?.error ?? "",
+      it.sample ?? "",
+    ].map(esc).join(","));
+  }
+  return lines.join("\n");
+}
 
 function BulkCleanupPanel() {
   const [scanning, setScanning] = useState(false);
@@ -285,6 +317,10 @@ function BulkCleanupPanel() {
   const [items, setItems] = useState<LeakItem[] | null>(null);
   const [results, setResults] = useState<FixResult[] | null>(null);
   const [status, setStatus] = useState("");
+  const [targetUrl, setTargetUrl] = useState("");
+  const [targetBusy, setTargetBusy] = useState(false);
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<Verdict | null>(null);
 
   const scan = async () => {
     setScanning(true); setResults(null); setItems([]);
@@ -330,6 +366,77 @@ function BulkCleanupPanel() {
     setStatus(""); setFixing(false);
   };
 
+  const scanUrl = async () => {
+    if (!targetUrl.trim()) return;
+    setTargetBusy(true);
+    try {
+      const r = await callAudit<{ affected: LeakItem[]; count: number }>("wp-bulk-cleanup", { mode: "scan_url", url: targetUrl.trim() });
+      const affected = (r.affected || []).filter((a) => a.found);
+      setItems(affected);
+      setResults(null);
+      toast({
+        title: affected.length ? `Leak found in ${affected.length} post` : "No leak in this post",
+        description: affected.length ? `Post ID ${affected[0].post_id} — click "Fix ${affected.length}" to clean it.` : "The WordPress origin REST content is clean.",
+      });
+    } catch (e: any) { toast({ title: "URL scan failed", description: e.message, variant: "destructive" }); }
+    setTargetBusy(false);
+  };
+
+  const fixUrl = async () => {
+    if (!targetUrl.trim()) return;
+    setTargetBusy(true);
+    try {
+      const lookup = await callAudit<{ affected: LeakItem[] }>("wp-bulk-cleanup", { mode: "scan_url", url: targetUrl.trim() });
+      const post = (lookup.affected || [])[0];
+      if (!post) { toast({ title: "No matching post" }); setTargetBusy(false); return; }
+      const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "fix", post_ids: [post.post_id] });
+      setItems([{ ...post, found: true }]);
+      setResults(r.results);
+      const res = r.results[0];
+      toast({
+        title: res?.ok ? `Fixed post ${post.post_id}` : `Fix failed`,
+        description: res?.ok ? `Removed ${res.removed_chars} chars of orphan wrappers.` : (res?.error || "Unknown error"),
+        variant: res?.ok ? undefined : "destructive",
+      });
+    } catch (e: any) { toast({ title: "URL fix failed", description: e.message, variant: "destructive" }); }
+    setTargetBusy(false);
+  };
+
+  const verify = async () => {
+    if (!targetUrl.trim()) return;
+    setVerifyBusy(true);
+    setVerifyResult(null);
+    try {
+      const r = await callAudit<Verdict>("wp-bulk-cleanup", { mode: "verify", url: targetUrl.trim() });
+      setVerifyResult(r);
+    } catch (e: any) { toast({ title: "Verify failed", description: e.message, variant: "destructive" }); }
+    setVerifyBusy(false);
+  };
+
+  const exportJson = () => {
+    if (!items) return;
+    const payload = {
+      generated_at: new Date().toISOString(),
+      total: items.length,
+      items: items.map((it) => ({
+        ...it,
+        fix: results?.find((r) => r.post_id === it.post_id) || null,
+      })),
+    };
+    downloadFile(`audit-leaks-${Date.now()}.json`, JSON.stringify(payload, null, 2), "application/json");
+  };
+  const exportCsv = () => {
+    if (!items) return;
+    downloadFile(`audit-leaks-${Date.now()}.csv`, toCsv(items, results), "text/csv");
+  };
+
+  const verdictMeta: Record<Verdict["verdict"], { label: string; tone: string; explain: string }> = {
+    clean: { label: "Clean", tone: "text-emerald-500", explain: "Both the live page (cache-busted) and the WordPress origin are clean. If you still see the leak, your browser is showing a stored copy — hard-refresh with Ctrl/Cmd + Shift + R." },
+    stale_cache: { label: "Stale cache", tone: "text-amber-500", explain: "The WordPress origin is FIXED, but the live CDN/page cache still serves the old leak. Purge the CDN cache or wait for it to expire." },
+    real_leak: { label: "Real leak", tone: "text-destructive", explain: "Both the live page and the origin still contain the leak. Run Fix on this URL." },
+    origin_only: { label: "Origin only", tone: "text-amber-500", explain: "The origin REST content still has the leak but the rendered live HTML doesn't. Run Fix to normalize the source." },
+  };
+
   return (
     <Card className="mb-6 border-destructive/40">
       <CardHeader className="pb-3">
@@ -338,7 +445,7 @@ function BulkCleanupPanel() {
             <CardTitle className="text-base">Site-wide CSS leak cleanup</CardTitle>
             <p className="text-xs text-muted-foreground mt-1">Scans every published post for orphan CSS rendered as visible text (the <code>.gutf-article {`{ ... !important }`}</code> block at the top of posts). The fix re-wraps the orphan CSS in a single <code>&lt;style&gt;</code> tag inside the post — preserving the design, removing the visible leak.</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button size="sm" variant="outline" onClick={scan} disabled={scanning || fixing}>
               {scanning ? <Loader2 className="size-4 animate-spin mr-2" /> : <RefreshCw className="size-4 mr-2" />}
               {scanning && status ? status : "Scan all posts"}
@@ -347,39 +454,97 @@ function BulkCleanupPanel() {
               {fixing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
               {fixing && status ? status : `Fix ${items?.length ?? 0} posts`}
             </Button>
+            <Button size="sm" variant="outline" onClick={exportCsv} disabled={!items || items.length === 0}>Export CSV</Button>
+            <Button size="sm" variant="outline" onClick={exportJson} disabled={!items || items.length === 0}>Export JSON</Button>
           </div>
         </div>
       </CardHeader>
-      {(items || results) && (
-        <CardContent className="space-y-3">
-          {items && items.length === 0 && (
-            <div className="text-sm text-emerald-500">No posts contain leaked CSS. ✓</div>
-          )}
-          {items && items.length > 0 && (
-            <div className="overflow-x-auto border rounded-md max-h-72">
-              <table className="w-full text-xs">
-                <thead className="bg-muted/40 text-left sticky top-0">
-                  <tr><th className="p-2">ID</th><th className="p-2">Title</th><th className="p-2">Result</th></tr>
-                </thead>
-                <tbody>
-                  {items.map((it) => {
-                    const res = results?.find((r) => r.post_id === it.post_id);
-                    return (
-                      <tr key={it.post_id} className="border-t">
-                        <td className="p-2 font-medium">{it.post_id}</td>
-                        <td className="p-2"><a className="text-primary hover:underline" href={it.link} target="_blank" rel="noreferrer">{it.title}</a></td>
-                        <td className="p-2">
-                          {res ? (res.ok ? <span className="text-emerald-500">✓ removed {res.removed_chars}c</span> : <span className="text-destructive">✗ {res.error}</span>) : <span className="text-muted-foreground">pending</span>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+      <CardContent className="space-y-4">
+        <div className="border rounded-md p-3 space-y-3 bg-muted/20">
+          <div className="text-sm font-medium">Targeted URL · scan / fix / verify (cache-busted)</div>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              placeholder="https://gearuptofit.com/review/some-post/"
+              value={targetUrl}
+              onChange={(e) => setTargetUrl(e.target.value)}
+              className="flex-1 min-w-[260px]"
+            />
+            <Button size="sm" variant="outline" onClick={scanUrl} disabled={targetBusy || !targetUrl.trim()}>
+              {targetBusy ? <Loader2 className="size-4 animate-spin" /> : "Scan URL"}
+            </Button>
+            <Button size="sm" variant="destructive" onClick={fixUrl} disabled={targetBusy || !targetUrl.trim()}>
+              Fix URL
+            </Button>
+            <Button size="sm" variant="outline" onClick={verify} disabled={verifyBusy || !targetUrl.trim()}>
+              {verifyBusy ? <Loader2 className="size-4 animate-spin" /> : "Verify (cache-bust)"}
+            </Button>
+          </div>
+          {verifyResult && (
+            <div className="text-xs space-y-2 border-t pt-3">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">Verdict:</span>
+                <span className={`font-bold ${verdictMeta[verifyResult.verdict].tone}`}>
+                  {verdictMeta[verifyResult.verdict].label}
+                </span>
+                <span className="text-muted-foreground">· HTTP {verifyResult.liveStatus} · {verifyResult.liveBytes.toLocaleString()} bytes</span>
+              </div>
+              <p className="text-muted-foreground">{verdictMeta[verifyResult.verdict].explain}</p>
+              <div className="grid md:grid-cols-2 gap-2">
+                <div className="border rounded p-2">
+                  <div className="font-medium">Live HTML (cache-busted)</div>
+                  <div className={verifyResult.live.found ? "text-destructive" : "text-emerald-500"}>
+                    {verifyResult.live.found ? "Leak present" : "Clean"}
+                  </div>
+                  {verifyResult.live.sample && <div className="text-muted-foreground mt-1 truncate">{verifyResult.live.sample}</div>}
+                </div>
+                <div className="border rounded p-2">
+                  <div className="font-medium">WordPress origin (REST)</div>
+                  <div className={verifyResult.rest.found ? "text-destructive" : "text-emerald-500"}>
+                    {verifyResult.rest.found ? "Leak present" : "Clean"}
+                  </div>
+                  {verifyResult.post_id && <div className="text-muted-foreground mt-1">post_id: {verifyResult.post_id}</div>}
+                </div>
+              </div>
+              {Object.keys(verifyResult.cacheHeaders).length > 0 && (
+                <details className="text-muted-foreground">
+                  <summary className="cursor-pointer">Cache headers</summary>
+                  <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px]">{Object.entries(verifyResult.cacheHeaders).map(([k, v]) => `${k}: ${v}`).join("\n")}</pre>
+                </details>
+              )}
+              <a href={verifyResult.liveUrl} target="_blank" rel="noreferrer" className="text-primary underline inline-flex items-center gap-1">
+                Open cache-busted URL <ExternalLink className="size-3" />
+              </a>
             </div>
           )}
-        </CardContent>
-      )}
+        </div>
+
+        {items && items.length === 0 && !scanning && (
+          <div className="text-sm text-emerald-500">No posts contain leaked CSS. ✓</div>
+        )}
+        {items && items.length > 0 && (
+          <div className="overflow-x-auto border rounded-md max-h-72">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40 text-left sticky top-0">
+                <tr><th className="p-2">ID</th><th className="p-2">Title</th><th className="p-2">Result</th></tr>
+              </thead>
+              <tbody>
+                {items.map((it) => {
+                  const res = results?.find((r) => r.post_id === it.post_id);
+                  return (
+                    <tr key={it.post_id} className="border-t">
+                      <td className="p-2 font-medium">{it.post_id}</td>
+                      <td className="p-2"><a className="text-primary hover:underline" href={it.link} target="_blank" rel="noreferrer">{it.title}</a></td>
+                      <td className="p-2">
+                        {res ? (res.ok ? <span className="text-emerald-500">✓ removed {res.removed_chars}c</span> : <span className="text-destructive">✗ {res.error}</span>) : <span className="text-muted-foreground">pending</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
     </Card>
   );
 }
