@@ -441,6 +441,8 @@ function scorePost(post: any): { score: number; issues: Issue[]; metrics: any } 
   issues.push(...detectStructureIssues(html, text, wordCount));
   issues.push(...detectVisualIssues(html));
   issues.push(...detectSchemaIssues(html, yoast));
+  const cwvOut = detectCwvIssues(html);
+  issues.push(...cwvOut.issues);
 
   // Score = 100 minus weighted penalties
   const weights: Record<Sev, number> = { critical: 12, high: 6, medium: 3, polish: 1 };
@@ -459,6 +461,7 @@ function scorePost(post: any): { score: number; issues: Issue[]; metrics: any } 
       lists: countMatches(html, /<(?:ul|ol)\b/gi),
       hasFaqHeading: /<h[23][^>]*>\s*(faq|frequently asked|questions)\b/i.test(html),
       hasConclusion: /<h[23][^>]*>\s*(conclusion|bottom line|takeaway)/i.test(html),
+      cwv: cwvOut.cwv,
     },
   };
 }
