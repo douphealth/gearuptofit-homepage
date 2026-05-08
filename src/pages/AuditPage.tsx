@@ -209,6 +209,9 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
 
       <DiagnosticPanel diagnostics={diagnostics} loading={loading} onRetry={retryMissing} />
 
+      <BulkCleanupPanel />
+
+
       <div className="flex flex-wrap gap-2 mb-4">
         <Input placeholder="Filter by title…" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
         {(["all", "critical", "high"] as const).map((s) => (
