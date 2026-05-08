@@ -13,6 +13,15 @@ import {
 type Issue = { severity: "critical" | "high" | "polish"; code: string; message: string };
 type ScoreRow = { post_id: number; score: number; issues: Issue[]; metrics: any; scanned_at: string };
 type Post = { post_id: number; slug: string; title: string; link: string; modified_at: string };
+type ImportPage = { page: number; status: string; retry_count: number; imported_count: number; post_ids?: number[]; error?: string | null };
+type MissingPost = { id: number; slug: string; title?: string };
+type Diagnostics = {
+  authoritative?: { totalPublished: number; totalPages: number; perPage: number; cachedCount: number; difference: number; complete: boolean };
+  run?: { id: string; status: string; expected_total: number; expected_pages: number; imported_total: number; first_missing_page?: number | null; updated_at?: string } | null;
+  pages?: ImportPage[];
+  firstMissingPage?: number | null;
+  missingFromCache?: MissingPost[];
+};
 
 function sevColor(s: Issue["severity"]) {
   return s === "critical" ? "destructive" : s === "high" ? "default" : "secondary";
@@ -62,11 +71,11 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [sevFilter, setSevFilter] = useState<"all" | "critical" | "high">("all");
   const [selected, setSelected] = useState<Post | null>(null);
   const [progress, setProgress] = useState<string>("");
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
 
   const loadScores = async (ids: number[]) => {
     if (!ids.length) { setScores({}); return; }
-    const { data } = await (await import("@/integrations/supabase/client")).supabase
-      .from("audit_scores").select("*").in("post_id", ids);
+    const { scores: data } = await callAudit<{ scores: ScoreRow[] }>("audit-score", { mode: "list", post_ids: ids });
     const map: Record<number, ScoreRow> = {};
     (data || []).forEach((s: any) => { map[s.post_id] = s as ScoreRow; });
     setScores(map);
@@ -76,36 +85,67 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     setLoading(true);
     setProgress("");
     try {
-      const init = await callAudit<{ posts?: Post[]; totalPages?: number; needsFetch?: boolean }>(
-        "wp-fetch-posts", { mode: "list", force },
-      );
-      if (!init.needsFetch) {
-        setPosts(init.posts || []);
-        await loadScores((init.posts || []).map((p) => p.post_id));
-      } else {
-        const total = init.totalPages || 1;
-        let failed = 0;
-        for (let page = 1; page <= total; page++) {
-          setProgress(`Fetching ${page}/${total}${failed ? ` (${failed} retried)` : ""}…`);
-          let ok = false;
-          for (let attempt = 0; attempt < 3 && !ok; attempt++) {
-            try { await callAudit("wp-fetch-posts", { mode: "fetch", page }); ok = true; }
-            catch (err) { await new Promise((r) => setTimeout(r, 800 * (attempt + 1))); }
+      let state = await callAudit<Diagnostics & { posts?: Post[] }>("wp-fetch-posts", { mode: force ? "start" : "list" });
+      setDiagnostics(state);
+      if (force) {
+        const runId = state.run?.id;
+        if (!runId) throw new Error("Import run could not start");
+        const attempts: Record<number, number> = {};
+        while (state.firstMissingPage) {
+          const page = state.firstMissingPage;
+          const total = state.authoritative?.totalPages || state.run?.expected_pages || "?";
+          attempts[page] = (attempts[page] || 0) + 1;
+          setProgress(`Fetching page ${page}/${total} · try ${attempts[page]}…`);
+          try {
+            state = await callAudit<Diagnostics & { done?: boolean }>("wp-fetch-posts", { mode: "continue", run_id: runId });
+          } catch (err) {
+            state = await callAudit<Diagnostics>("wp-fetch-posts", { mode: "diagnostics", run_id: runId });
           }
-          if (!ok) failed++;
+          setDiagnostics(state);
+          if (attempts[page] >= 3 && state.firstMissingPage === page) break;
         }
-        setProgress("Loading…");
-        const r = await callAudit<{ posts: Post[] }>("wp-fetch-posts", { mode: "results" });
-        setPosts(r.posts || []);
-        await loadScores((r.posts || []).map((p) => p.post_id));
-        if (failed) toast({ title: `${failed} pages failed`, description: "Click Refresh WP again to retry missing pages", variant: "destructive" });
       }
+      setProgress("Loading…");
+      const r = await callAudit<Diagnostics & { posts: Post[] }>("wp-fetch-posts", { mode: "results", run_id: state.run?.id });
+      setDiagnostics(r);
+      setPosts(r.posts || []);
+      await loadScores((r.posts || []).map((p) => p.post_id));
+      if (r.authoritative && !r.authoritative.complete) toast({ title: `${r.authoritative.difference} posts still missing`, description: "Diagnostics shows the first missing page and missing IDs.", variant: "destructive" });
     } catch (e: any) { toast({ title: "Load failed", description: e.message, variant: "destructive" }); }
     setProgress("");
     setLoading(false);
   };
 
+  const retryMissing = async () => {
+    setLoading(true);
+    try {
+      let state = await callAudit<Diagnostics>("wp-fetch-posts", { mode: "retry", run_id: diagnostics?.run?.id });
+      setDiagnostics(state);
+      const runId = state.run?.id;
+      const attempts: Record<number, number> = {};
+      while (runId && state.firstMissingPage) {
+        const page = state.firstMissingPage;
+        attempts[page] = (attempts[page] || 0) + 1;
+        setProgress(`Retrying page ${page}/${state.authoritative?.totalPages || "?"} · try ${attempts[page]}…`);
+        try {
+          state = await callAudit<Diagnostics>("wp-fetch-posts", { mode: "continue", run_id: runId });
+        } catch (err) {
+          state = await callAudit<Diagnostics>("wp-fetch-posts", { mode: "diagnostics", run_id: runId });
+        }
+        setDiagnostics(state);
+        if (attempts[page] >= 3 && state.firstMissingPage === page) break;
+      }
+      await load(false);
+    } catch (e: any) { toast({ title: "Retry failed", description: e.message, variant: "destructive" }); }
+    setProgress("");
+    setLoading(false);
+  };
+
   const runScan = async () => {
+    if (!posts.length) {
+      toast({ title: "No cached posts", description: "Run Refresh WP first." });
+      return;
+    }
     setScanning(true);
     try {
       let scanned = 0;
@@ -166,6 +206,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         <Stat label="Critical issues" value={stats.critical} className="text-destructive" />
         <Stat label="High issues" value={stats.high} className="text-amber-500" />
       </div>
+
+      <DiagnosticPanel diagnostics={diagnostics} loading={loading} onRetry={retryMissing} />
 
       <div className="flex flex-wrap gap-2 mb-4">
         <Input placeholder="Filter by title…" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
@@ -228,6 +270,84 @@ function Stat({ label, value, className = "" }: { label: string; value: number |
       <div className="text-xs text-muted-foreground uppercase tracking-wide">{label}</div>
       <div className={`text-3xl font-bold ${className}`}>{value}</div>
     </CardContent></Card>
+  );
+}
+
+function DiagnosticPanel({ diagnostics, loading, onRetry }: { diagnostics: Diagnostics | null; loading: boolean; onRetry: () => void }) {
+  const a = diagnostics?.authoritative;
+  const pages = diagnostics?.pages || [];
+  const missing = diagnostics?.missingFromCache || [];
+  return (
+    <Card className="mb-6">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <CardTitle className="text-base">WordPress Import Diagnostics</CardTitle>
+          <Button size="sm" variant="outline" onClick={onRetry} disabled={loading || !diagnostics?.run}>
+            <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} /> Retry missing pages
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+          <MiniStat label="WP total" value={a?.totalPublished ?? "—"} />
+          <MiniStat label="Cached" value={a?.cachedCount ?? "—"} />
+          <MiniStat label="Missing" value={a?.difference ?? "—"} className={a?.complete ? "text-emerald-500" : "text-destructive"} />
+          <MiniStat label="Pages" value={a ? `${pages.filter((p) => p.status === "success").length}/${a.totalPages}` : "—"} />
+          <MiniStat label="First gap" value={diagnostics?.firstMissingPage ?? "none"} />
+        </div>
+
+        {pages.length > 0 && (
+          <div className="overflow-x-auto border rounded-md">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40 text-left">
+                <tr>
+                  <th className="p-2">Page</th>
+                  <th className="p-2">Status</th>
+                  <th className="p-2">Retries</th>
+                  <th className="p-2">Imported</th>
+                  <th className="p-2">IDs</th>
+                  <th className="p-2">Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pages.map((p) => (
+                  <tr key={p.page} className="border-t">
+                    <td className="p-2 font-medium">{p.page}</td>
+                    <td className="p-2"><Badge variant={p.status === "success" ? "secondary" : p.status === "failed" ? "destructive" : "outline"}>{p.status}</Badge></td>
+                    <td className="p-2">{p.retry_count}</td>
+                    <td className="p-2">{p.imported_count}</td>
+                    <td className="p-2 text-muted-foreground max-w-xs truncate">{(p.post_ids || []).slice(0, 12).join(", ")}{(p.post_ids?.length || 0) > 12 ? "…" : ""}</td>
+                    <td className="p-2 text-destructive max-w-xs truncate">{p.error || ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {missing.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Missing from cache ({missing.length} shown)</div>
+            <div className="grid md:grid-cols-2 gap-2 text-xs">
+              {missing.slice(0, 60).map((m) => (
+                <div key={m.id} className="border rounded-md p-2">
+                  <span className="font-medium">#{m.id}</span> <span className="text-muted-foreground">/{m.slug}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MiniStat({ label, value, className = "" }: { label: string; value: number | string; className?: string }) {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="text-xs text-muted-foreground uppercase tracking-wide">{label}</div>
+      <div className={`text-xl font-bold ${className}`}>{value}</div>
+    </div>
   );
 }
 
