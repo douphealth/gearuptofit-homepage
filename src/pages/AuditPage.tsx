@@ -409,6 +409,9 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
             <a href={post.link} target="_blank" rel="noreferrer" className="text-sm text-primary inline-flex items-center gap-1">
               View live <ExternalLink className="size-3" />
             </a>
+            <Button onClick={revertDraft} disabled={pushing} variant="outline" size="sm" className="ml-auto">
+              Revert draft to live
+            </Button>
           </div>
 
           {score?.issues && score.issues.length > 0 && (
