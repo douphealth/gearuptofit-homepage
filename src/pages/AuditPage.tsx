@@ -298,7 +298,7 @@ function BulkCleanupPanel() {
         );
         all.push(...r.affected);
         setItems([...all]);
-        setStatus(`Scanned ${page}/${r.totalPages || "?"} WordPress pages · ${all.length} affected`);
+        setStatus(`Scanned CSS snippets · ${all.length} affected`);
         if (r.done) break;
         page++;
         if (page > 5000) break;
