@@ -57,8 +57,32 @@ function stripStyleAndScript(html: string): string {
     .replace(/<script[\s\S]*?<\/script>/gi, "");
 }
 
+function codeHasRawCssLeak(code: string): boolean {
+  const trimmed = code.trim();
+  if (!trimmed) return false;
+  if (/^<style\b[\s\S]*<\/style>\s*$/i.test(trimmed)) return false;
+  return LEAK_ANCHORS.some((a) => trimmed.includes(a));
+}
+
+function snippetTitle(item: Snippet): string {
+  return stripTags(String(item.title?.raw || item.title?.rendered || "Untitled snippet"));
+}
+
+function snippetHasLeak(item: Snippet): { found: boolean; sample?: string; reason?: string } {
+  const title = snippetTitle(item);
+  const code = String(item.meta?._elementor_code || "");
+  if (/post layout fix/i.test(title) && LEAK_ANCHORS.some((a) => code.includes(a.replace(" ", "")) || code.includes(a))) {
+    return { found: true, reason: "duplicated global Elementor CSS snippet", sample: code.slice(0, 180).replace(/\s+/g, " ") };
+  }
+  if (codeHasRawCssLeak(code)) {
+    return { found: true, reason: "raw CSS missing <style> wrapper", sample: code.slice(0, 180).replace(/\s+/g, " ") };
+  }
+  return { found: false };
+}
+
 function htmlHasLeak(html: string): { found: boolean; sample?: string } {
-  const stripped = stripStyleAndScript(html);
+  const withoutStyles = stripStyleAndScript(html);
+  const stripped = withoutStyles.replace(/<!--[\s\S]*?-->/g, "");
   for (const a of LEAK_ANCHORS) {
     const i = stripped.indexOf(a);
     if (i !== -1) {
