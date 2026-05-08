@@ -154,6 +154,148 @@ function detectVisualIssues(html: string): Issue[] {
   return issues;
 }
 
+/* ----------------------- CORE WEB VITALS HEURISTICS -------------------- */
+// Static, content-level signals that correlate with CWV (LCP / CLS / INP).
+// We can't measure runtime metrics from REST content alone, but we can
+// surface every issue that materially harms each pillar.
+function detectCwvIssues(html: string): { issues: Issue[]; cwv: any } {
+  const issues: Issue[] = [];
+  const imgs = html.match(/<img\b[^>]*>/gi) || [];
+  const iframes = html.match(/<iframe\b[^>]*>/gi) || [];
+
+  // ── LCP signals ─────────────────────────────────────────────────────────
+  // Hero image (first <img> in content) — needs fetchpriority=high, eager, no lazy.
+  const firstImg = imgs[0] || "";
+  const hasFetchPriority = /\bfetchpriority=["']high["']/i.test(firstImg);
+  const heroLazy = /\bloading=["']lazy["']/i.test(firstImg);
+  if (firstImg && !hasFetchPriority) {
+    issues.push({
+      severity: "high", category: "visual", code: "lcp-no-fetchpriority",
+      message: "Hero image missing fetchpriority=\"high\" — slows LCP",
+    });
+  }
+  if (firstImg && heroLazy) {
+    issues.push({
+      severity: "high", category: "visual", code: "lcp-hero-lazy",
+      message: "Hero image is lazy-loaded — delays LCP",
+    });
+  }
+  // Non-WebP/AVIF hero
+  if (firstImg && /\.(jpg|jpeg|png)["'?\s]/i.test(firstImg)) {
+    issues.push({
+      severity: "medium", category: "visual", code: "lcp-hero-format",
+      message: "Hero image is JPG/PNG — convert to WebP/AVIF for faster LCP",
+    });
+  }
+  // Total image weight proxy: many large images above the fold
+  const aboveFold = imgs.slice(0, 3);
+  const eagerCount = aboveFold.filter((i) => !/\bloading=["']lazy["']/i.test(i)).length;
+  if (eagerCount > 2) {
+    issues.push({
+      severity: "medium", category: "visual", code: "lcp-many-eager",
+      message: `${eagerCount} eager-loaded images above the fold — competes for LCP bandwidth`,
+    });
+  }
+
+  // ── CLS signals ─────────────────────────────────────────────────────────
+  const imgsNoDims = imgs.filter((i) => !/\swidth=/i.test(i) || !/\sheight=/i.test(i));
+  if (imgsNoDims.length > 0) {
+    issues.push({
+      severity: imgsNoDims.length > 4 ? "high" : "medium",
+      category: "visual", code: "cls-img-no-dims",
+      message: `${imgsNoDims.length} image(s) without explicit width/height — causes CLS`,
+    });
+  }
+  const iframesNoDims = iframes.filter((i) => !/\swidth=/i.test(i) || !/\sheight=/i.test(i));
+  if (iframesNoDims.length > 0) {
+    issues.push({
+      severity: "medium", category: "visual", code: "cls-iframe-no-dims",
+      message: `${iframesNoDims.length} iframe(s) without dimensions — causes CLS`,
+    });
+  }
+  // Web fonts loaded with @font-face inside content (causes FOIT/FOUT layout shift)
+  if (/@font-face/i.test(html)) {
+    issues.push({
+      severity: "polish", category: "visual", code: "cls-font-in-content",
+      message: "@font-face declared in post content — risks layout shift; move to theme with font-display:swap",
+    });
+  }
+  // Ad/affiliate iframes without aspect-ratio container
+  const adlikeIframes = iframes.filter((i) => /amazon|adsbygoogle|affiliate|impact|skimresources/i.test(i));
+  if (adlikeIframes.length && !/aspect-ratio|gutf-embed-wrap|min-height/i.test(html)) {
+    issues.push({
+      severity: "medium", category: "visual", code: "cls-ad-no-reserve",
+      message: `${adlikeIframes.length} ad/affiliate iframe(s) without reserved space — causes CLS on load`,
+    });
+  }
+
+  // ── INP signals ─────────────────────────────────────────────────────────
+  const inlineScripts = (html.match(/<script\b(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/gi) || []);
+  const heavyInline = inlineScripts.filter((s) => s.length > 4000);
+  if (heavyInline.length) {
+    issues.push({
+      severity: "high", category: "visual", code: "inp-heavy-inline-script",
+      message: `${heavyInline.length} large inline script(s) (>4KB) — blocks interactivity`,
+    });
+  }
+  const externalScripts = (html.match(/<script\b[^>]*\bsrc=["'][^"']+["'][^>]*>/gi) || []);
+  const blockingScripts = externalScripts.filter(
+    (s) => !/\b(async|defer)\b/i.test(s),
+  );
+  if (blockingScripts.length) {
+    issues.push({
+      severity: "high", category: "visual", code: "inp-blocking-script",
+      message: `${blockingScripts.length} render-blocking script(s) (no async/defer)`,
+    });
+  }
+  if (externalScripts.length > 6) {
+    issues.push({
+      severity: "medium", category: "visual", code: "inp-script-bloat",
+      message: `${externalScripts.length} third-party scripts in content — risks INP`,
+    });
+  }
+
+  // DOM size proxy (huge HTML payload)
+  const domNodes = countMatches(html, /<[a-z][a-z0-9]*\b/gi);
+  if (domNodes > 1500) {
+    issues.push({
+      severity: "medium", category: "visual", code: "cwv-dom-bloat",
+      message: `~${domNodes} DOM nodes in post content — heavy DOM hurts INP/CLS`,
+    });
+  }
+
+  // Compose CWV sub-score (0-100)
+  const cwvWeights: Record<Sev, number> = { critical: 25, high: 15, medium: 8, polish: 3 };
+  let cwvPenalty = 0;
+  for (const i of issues) cwvPenalty += cwvWeights[i.severity] || 0;
+  const cwvScore = HARD(100 - cwvPenalty);
+
+  return {
+    issues,
+    cwv: {
+      score: cwvScore,
+      lcp: {
+        heroFetchPriority: hasFetchPriority,
+        heroLazy,
+        heroFormat: /\.(webp|avif)["'?\s]/i.test(firstImg) ? "modern" : (firstImg ? "legacy" : "none"),
+        eagerAboveFold: eagerCount,
+      },
+      cls: {
+        imagesMissingDims: imgsNoDims.length,
+        iframesMissingDims: iframesNoDims.length,
+        adsWithoutReserve: adlikeIframes.length,
+      },
+      inp: {
+        inlineScripts: inlineScripts.length,
+        heavyInlineScripts: heavyInline.length,
+        blockingScripts: blockingScripts.length,
+        externalScripts: externalScripts.length,
+      },
+      domNodes,
+    },
+  };
+}
+
 /* ----------------------------- SEO / AEO ------------------------------ */
 function detectStructureIssues(html: string, text: string, wordCount: number): Issue[] {
   const issues: Issue[] = [];
