@@ -56,40 +56,20 @@ function applyVisualFixes(raw: string): { html: string; changes: string[] } {
   const changes: string[] = [];
   let html = raw;
 
-  // Wrap unwrapped <table>
-  html = html.replace(/(?<!gutf-table-wrap[^>]*>\s*)<table\b/gi, (m, _o, idx, str) => {
-    // simple lookbehind heuristic: check 80 chars before for an existing wrapper class
-    const before = str.slice(Math.max(0, idx - 120), idx);
-    if (/gutf-table-wrap|table-responsive|wp-block-table|comparison-table-wrapper|overflow-x-auto/.test(before)) return m;
-    return `<div class="gutf-table-wrap"><table`;
+  // Wrap unwrapped <table>...</table> blocks
+  html = html.replace(/<table\b[\s\S]*?<\/table>/gi, (match: string, offset: number, src: string) => {
+    const before = src.slice(Math.max(0, offset - 120), offset);
+    if (/gutf-table-wrap|table-responsive|wp-block-table|comparison-table-wrapper|overflow-x-auto/i.test(before)) return match;
+    changes.push("wrapped-table");
+    return `<div class="gutf-table-wrap">${match}</div>`;
   });
-  // Close wrapper after </table> only where we opened one — we use a marker pass:
-  // Simple approach: replace opener with placeholder then re-flow.
-  if (html.includes(`<div class="gutf-table-wrap"><table`)) {
-    // For each opener we inserted, find the matching </table> and append </div>
-    const parts: string[] = [];
-    let cursor = 0;
-    const opener = `<div class="gutf-table-wrap"><table`;
-    while (true) {
-      const i = html.indexOf(opener, cursor);
-      if (i < 0) { parts.push(html.slice(cursor)); break; }
-      parts.push(html.slice(cursor, i));
-      const end = html.indexOf("</table>", i);
-      if (end < 0) { parts.push(html.slice(i)); break; }
-      const segment = html.slice(i, end + "</table>".length) + "</div>";
-      parts.push(segment);
-      cursor = end + "</table>".length;
-      changes.push("wrapped-table");
-    }
-    html = parts.join("");
-  }
 
   // Wrap unwrapped <iframe> (YouTube etc.)
-  html = html.replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, (m, idx, str) => {
-    const before = (str || "").slice(Math.max(0, idx - 80), idx);
-    if (/gutf-embed-wrap|embed-responsive|video-wrapper/.test(before)) return m;
+  html = html.replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, (match: string, offset: number, src: string) => {
+    const before = src.slice(Math.max(0, offset - 80), offset);
+    if (/gutf-embed-wrap|embed-responsive|video-wrapper/i.test(before)) return match;
     changes.push("wrapped-iframe");
-    return `<div class="gutf-embed-wrap">${m}</div>`;
+    return `<div class="gutf-embed-wrap">${match}</div>`;
   });
 
   // Strip fixed style="width:Xpx" when X>360
