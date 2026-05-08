@@ -75,8 +75,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   const loadScores = async (ids: number[]) => {
     if (!ids.length) { setScores({}); return; }
-    const { data } = await (await import("@/integrations/supabase/client")).supabase
-      .from("audit_scores").select("*").in("post_id", ids);
+    const { scores: data } = await callAudit<{ scores: ScoreRow[] }>("audit-score", { mode: "list", post_ids: ids });
     const map: Record<number, ScoreRow> = {};
     (data || []).forEach((s: any) => { map[s.post_id] = s as ScoreRow; });
     setScores(map);
