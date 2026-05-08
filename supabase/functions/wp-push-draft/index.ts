@@ -5,7 +5,7 @@ const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
 const DETAIL_FIELDS = "id,content";
 
 async function fetchOriginalContent(postId: number) {
-  const r = await fetch(`${WP_BASE}/posts/${postId}?status=publish&_fields=${DETAIL_FIELDS}`, {
+  const r = await fetch(`${WP_BASE}/posts/${postId}?_fields=${DETAIL_FIELDS}`, {
     headers: { "User-Agent": "GearupAudit/1.0" },
   });
   if (!r.ok) return "";
