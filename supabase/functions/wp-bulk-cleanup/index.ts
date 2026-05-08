@@ -1,28 +1,20 @@
-// Site-wide cleanup of "leaked CSS" in WordPress posts.
+// Site-wide cleanup of leaked WordPress post CSS.
 //
-// Background:
-//   When earlier drafts were pushed via the REST API, WordPress's KSES filter
-//   stripped <style> tags from post content. The CSS rules survived as raw
-//   visible text at the top of the post, e.g. ".gutf-article { max-width: 100%
-//   !important; ... }". This function scans every cached post, detects the
-//   leakage, removes it, re-wraps the rules inside a proper <style> block
-//   (preserved by the block editor when written through wp.update via REST
-//   *with* `meta` only — but here we keep it simple and just clean content),
-//   and writes the cleaned content back to WP.
-//
-// Modes:
-//   scan : returns a list of affected post IDs + a small preview, no writes.
-//   fix  : applies the cleanup for the given post_ids (or all detected if
-//          omitted). Writes status=publish updates (the live posts already
-//          contain the leaked text, so we are *fixing* live, not introducing
-//          a draft diff).
+// Designed for strict Edge Function memory limits:
+// - no heavy SDK imports
+// - scan reads one small WP page per invocation by default
+// - fix rewrites one post per invocation by default
+// - leaked CSS is removed, not re-wrapped in <style>, because WP REST/KSES can
+//   strip <style> and expose the CSS as visible text again.
 
-import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+};
 
 const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
-
-const LEAKED_CSS = `.gutf-article { max-width: 100% !important; width: 100% !important; padding: 24px 16px !important; margin: 0 auto !important; box-sizing: border-box !important; } .product-box-inner { flex-direction: row !important; flex-wrap: wrap !important; gap: 20px !important; } .product-box-img { flex: 0 0 auto !important; width: 100% !important; max-width: 280px !important; } .product-box-content { flex: 1 1 300px !important; min-width: 250px !important; } .gutf-article table { display: block !important; width: 100% !important; max-width: 100% !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch !important; white-space: normal !important; } .gutf-article table td, .gutf-article table th { white-space: normal !important; word-break: break-word !important; } .video-container { position: relative !important; width: 100% !important; max-width: 100% !important; padding-bottom: 56.25% !important; height: 0 !important; overflow: hidden !important; } .video-container iframe { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; } .gutf-article img { max-width: 100% !important; height: auto !important; } .comparison-table, .wp-block-table { display: block !important; width: 100% !important; overflow-x: auto !important; } .section, .toc-card, .key-takeaway, .methodology-box, .pros-box, .cons-box { width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; } .elementor-widget-theme-post-content { max-width: 880px !important; margin: 0 auto !important; } @media (max-width: 768px) { .gutf-article { padding: 16px 12px !important; font-size: 16px !important; line-height: 1.75 !important; } .product-box-inner { flex-direction: column !important; align-items: center !important; } .product-box-img { max-width: 200px !important; } .product-box-content { width: 100% !important; text-align: center !important; } .product-box-specs { text-align: left !important; } .comparison-table-wrapper { overflow-x: auto !important; -webkit-overflow-scrolling: touch !important; } .gutf-article * { max-width: 100vw !important; box-sizing: border-box !important; } .e-con-inner { padding-left: 10px !important; padding-right: 10px !important; } } @media (max-width: 480px) { .gutf-article { padding: 12px 10px !important; font-size: 15px !important; } .product-box-img { max-width: 160px !important; } }`;
+const MAX_SCAN_PER_PAGE = 3;
+const MAX_FIX_PER_CALL = 1;
 
 const LEAK_ANCHORS = [
   ".gutf-article {",
@@ -30,18 +22,39 @@ const LEAK_ANCHORS = [
   ".elementor-widget-theme-post-content {",
 ];
 
+function toInt(value: unknown, fallback: number, min: number, max: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&#8211;/g, "–")
+    .replace(/&#8212;/g, "—")
+    .replace(/&#038;/g, "&")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function stripTags(value: string): string {
+  return decodeEntities(value.replace(/<[^>]+>/g, "").trim());
+}
+
 function extractLeak(text: string): { start: number; end: number; css: string } | null {
   let start = -1;
-  for (const a of LEAK_ANCHORS) {
-    const i = text.indexOf(a);
-    if (i !== -1 && (start === -1 || i < start)) start = i;
+  for (const anchor of LEAK_ANCHORS) {
+    const idx = text.indexOf(anchor);
+    if (idx !== -1 && (start === -1 || idx < start)) start = idx;
   }
   if (start === -1) return null;
 
   let depth = 0;
-  let i = start;
   let lastClose = -1;
-  for (; i < text.length; i++) {
+  for (let i = start; i < text.length; i++) {
     const c = text[i];
     if (c === "{") depth++;
     else if (c === "}") {
@@ -64,138 +77,190 @@ function extractLeak(text: string): { start: number; end: number; css: string } 
     }
   }
   if (lastClose === -1) return null;
-  const end = lastClose + 1;
-  return { start, end, css: text.slice(start, end) };
+  return { start, end: lastClose + 1, css: text.slice(start, lastClose + 1) };
+}
+
+function styleRanges(html: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  const re = /<style[\s\S]*?<\/style>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html)) !== null) ranges.push([match.index, match.index + match[0].length]);
+  return ranges;
+}
+
+function findLeakStartOutsideStyle(html: string): number {
+  const ranges = styleRanges(html);
+  const inStyle = (pos: number) => ranges.some(([s, e]) => pos >= s && pos < e);
+  let found = -1;
+  for (const anchor of LEAK_ANCHORS) {
+    let from = 0;
+    while (from < html.length) {
+      const idx = html.indexOf(anchor, from);
+      if (idx === -1) break;
+      if (!inStyle(idx) && (found === -1 || idx < found)) {
+        found = idx;
+        break;
+      }
+      from = idx + anchor.length;
+    }
+  }
+  return found;
+}
+
+function hasLeakOutsideStyle(html: string): boolean {
+  if (!LEAK_ANCHORS.some((anchor) => html.includes(anchor))) return false;
+  return findLeakStartOutsideStyle(html) !== -1;
 }
 
 function cleanContent(html: string): { cleaned: string; removed: string } | null {
-  const noStyle = html.replace(/<style[\s\S]*?<\/style>/gi, "");
-  const hasLeak = LEAK_ANCHORS.some((a) => noStyle.includes(a));
-  if (!hasLeak) return null;
-
-  const styleRegex = /<style[\s\S]*?<\/style>/gi;
-  const styleRanges: Array<[number, number]> = [];
-  let m: RegExpExecArray | null;
-  while ((m = styleRegex.exec(html)) !== null) {
-    styleRanges.push([m.index, m.index + m[0].length]);
-  }
-  const inStyle = (pos: number) => styleRanges.some(([s, e]) => pos >= s && pos < e);
-
-  let leakStart = -1;
-  for (const a of LEAK_ANCHORS) {
-    let from = 0;
-    while (true) {
-      const i = html.indexOf(a, from);
-      if (i === -1) break;
-      if (!inStyle(i)) { if (leakStart === -1 || i < leakStart) leakStart = i; break; }
-      from = i + a.length;
-    }
-  }
+  const leakStart = findLeakStartOutsideStyle(html);
   if (leakStart === -1) return null;
+  const leak = extractLeak(html.slice(leakStart));
+  if (!leak) return null;
 
-  const sub = html.slice(leakStart);
-  const ext = extractLeak(sub);
-  if (!ext) return null;
-  const removed = ext.css;
   const before = html.slice(0, leakStart);
-  const after = html.slice(leakStart + removed.length);
-
-  const styleBlock = `<style>${LEAKED_CSS}</style>\n`;
-  const cleaned = styleBlock + (before + after).replace(/^\s+/, "");
-  return { cleaned, removed };
+  const after = html.slice(leakStart + leak.css.length);
+  const cleaned = (before + after).replace(/^\s+/, "");
+  return { cleaned, removed: leak.css };
 }
 
-async function checkAuth(req: Request): Promise<boolean> {
-  let body: any = {};
-  try { body = await req.clone().json(); } catch { /* ignore */ }
-  const pw = body?._audit_password || req.headers.get("x-audit-password");
-  return !!pw && pw === Deno.env.get("AUDIT_PASSWORD");
+async function readBody(req: Request): Promise<Record<string, unknown>> {
+  try {
+    return await req.json();
+  } catch {
+    return {};
+  }
 }
 
-function jsonRes(p: unknown, s = 200) {
-  return new Response(JSON.stringify(p), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+function jsonRes(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+async function logCleanup(postId: number, removedChars: number) {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key || removedChars <= 0) return;
+
+  try {
+    const res = await fetch(`${url}/rest/v1/push_log`, {
+      method: "POST",
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        post_id: postId,
+        status: "cleanup",
+        message: `Removed ${removedChars} chars of leaked CSS text.`,
+        draft_url: `https://gearuptofit.com/wp-admin/post.php?post=${postId}&action=edit`,
+      }),
+    });
+    await res.text();
+  } catch {
+    // Logging must never make cleanup fail.
+  }
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (!(await checkAuth(req))) return jsonRes({ error: "Unauthorized" }, 401);
 
-  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-  const { mode = "scan", post_ids, limit = 50, page = 1, per_page = 25 } = await req.json().catch(() => ({}));
+  const body = await readBody(req);
+  const pw = String(body._audit_password || req.headers.get("x-audit-password") || "");
+  if (!pw || pw !== Deno.env.get("AUDIT_PASSWORD")) return jsonRes({ error: "Unauthorized" }, 401);
 
+  const mode = String(body.mode || "scan");
   const user = Deno.env.get("WP_USERNAME");
-  const pass = Deno.env.get("WP_APP_PASSWORD");
+  const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
 
-  // ── SCAN (single page per call to stay under memory limit) ──────────────
   if (mode === "scan") {
+    const page = toInt(body.page, 1, 1, 10000);
+    const perPage = toInt(body.per_page, 1, 1, MAX_SCAN_PER_PAGE);
+    const endpoint = `${WP_BASE}/posts?per_page=${perPage}&page=${page}&status=publish&_fields=id,link,title,content`;
+    const wpRes = await fetch(endpoint, { headers: { "User-Agent": "GearupAudit/1.0" } });
+
+    if (wpRes.status === 400) {
+      await wpRes.text();
+      return jsonRes({ mode, page, per_page: perPage, count: 0, affected: [], totalPages: 0, done: true });
+    }
+    if (!wpRes.ok) {
+      await wpRes.text();
+      return jsonRes({ error: `WP REST page ${page} failed: ${wpRes.status}` }, 502);
+    }
+
+    const totalPages = Number(wpRes.headers.get("x-wp-totalpages") || 0);
+    const text = await wpRes.text();
     const affected: Array<{ post_id: number; link: string; title: string }> = [];
-    const r = await fetch(`${WP_BASE}/posts?per_page=${per_page}&page=${page}&status=publish&_fields=id,link,title,content`, {
-      headers: { "User-Agent": "GearupAudit/1.0" },
-    });
-    if (r.status === 400) return jsonRes({ mode, page, per_page, count: 0, affected, totalPages: 0, done: true });
-    if (!r.ok) return jsonRes({ error: `WP REST page ${page} failed: ${r.status}` }, 502);
-    const totalPages = Number(r.headers.get("x-wp-totalpages") || 0);
-    const items = await r.json();
-    if (Array.isArray(items)) {
-      for (const it of items) {
-        const html = it?.content?.rendered || "";
-        // Quick anchor check first to avoid building a noStyle copy for every post.
-        if (!LEAK_ANCHORS.some((a) => html.includes(a))) continue;
-        const noStyle = html.replace(/<style[\s\S]*?<\/style>/gi, "");
-        if (LEAK_ANCHORS.some((a) => noStyle.includes(a))) {
+
+    if (LEAK_ANCHORS.some((anchor) => text.includes(anchor))) {
+      const items = JSON.parse(text);
+      if (Array.isArray(items)) {
+        for (const item of items) {
+          const html = item?.content?.rendered || item?.content?.raw || "";
+          if (!hasLeakOutsideStyle(html)) continue;
           affected.push({
-            post_id: it.id,
-            link: it.link,
-            title: (it.title?.rendered || "").replace(/<[^>]+>/g, ""),
+            post_id: Number(item.id),
+            link: String(item.link || ""),
+            title: stripTags(String(item.title?.rendered || "Untitled")),
           });
         }
       }
     }
-    const done = !Array.isArray(items) || items.length < per_page || (totalPages > 0 && page >= totalPages);
-    return jsonRes({ mode, page, per_page, totalPages, count: affected.length, affected, done });
+
+    const done = totalPages > 0 ? page >= totalPages : false;
+    return jsonRes({ mode, page, per_page: perPage, totalPages, count: affected.length, affected, done });
   }
 
   if (mode === "fix") {
     if (!user || !pass) return jsonRes({ error: "WP credentials not configured" }, 500);
-    const auth = "Basic " + btoa(`${user}:${pass.replace(/\s+/g, "")}`);
+    const ids = Array.isArray(body.post_ids) ? body.post_ids.map(Number).filter(Boolean) : [];
+    const limitedIds = ids.slice(0, MAX_FIX_PER_CALL);
+    if (!limitedIds.length) return jsonRes({ error: "post_ids required (one post per call)" }, 400);
 
-    const ids: number[] = Array.isArray(post_ids) ? post_ids.map(Number).filter(Boolean) : [];
-    if (ids.length === 0) return jsonRes({ error: "post_ids required (use mode=scan to discover)" }, 400);
-
+    const auth = "Basic " + btoa(`${user}:${pass}`);
     const results: Array<{ post_id: number; ok: boolean; removed_chars?: number; error?: string }> = [];
-    for (const id of ids.slice(0, limit)) {
-      try {
-        const g = await fetch(`${WP_BASE}/posts/${id}?_fields=id,content&context=edit`, {
-          headers: { "Authorization": auth, "User-Agent": "GearupAudit/1.0" },
-        });
-        if (!g.ok) { results.push({ post_id: id, ok: false, error: `GET ${g.status}` }); continue; }
-        const post = await g.json();
-        const raw = post?.content?.raw ?? post?.content?.rendered ?? "";
-        const c = cleanContent(raw);
-        if (!c) { results.push({ post_id: id, ok: true, removed_chars: 0 }); continue; }
 
-        const u = await fetch(`${WP_BASE}/posts/${id}`, {
-          method: "POST",
-          headers: { "Authorization": auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/1.0" },
-          body: JSON.stringify({ content: c.cleaned }),
+    for (const id of limitedIds) {
+      try {
+        const getRes = await fetch(`${WP_BASE}/posts/${id}?_fields=id,content&context=edit`, {
+          headers: { Authorization: auth, "User-Agent": "GearupAudit/1.0" },
         });
-        if (!u.ok) {
-          const t = await u.text();
-          results.push({ post_id: id, ok: false, error: `PUT ${u.status}: ${t.slice(0, 160)}` });
-        } else {
-          results.push({ post_id: id, ok: true, removed_chars: c.removed.length });
-          await supabase.from("push_log").insert({
-            post_id: id,
-            status: "cleanup",
-            message: `Removed ${c.removed.length} chars of leaked CSS, re-wrapped in <style>.`,
-            draft_url: `https://gearuptofit.com/wp-admin/post.php?post=${id}&action=edit`,
-          });
+        if (!getRes.ok) {
+          await getRes.text();
+          results.push({ post_id: id, ok: false, error: `GET ${getRes.status}` });
+          continue;
         }
-      } catch (e: any) {
-        results.push({ post_id: id, ok: false, error: e?.message || String(e) });
+        const post = await getRes.json();
+        const raw = post?.content?.raw ?? post?.content?.rendered ?? "";
+        const cleaned = cleanContent(raw);
+        if (!cleaned) {
+          results.push({ post_id: id, ok: true, removed_chars: 0 });
+          continue;
+        }
+
+        const updateRes = await fetch(`${WP_BASE}/posts/${id}`, {
+          method: "POST",
+          headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/1.0" },
+          body: JSON.stringify({ content: cleaned.cleaned }),
+        });
+        if (!updateRes.ok) {
+          const errorText = await updateRes.text();
+          results.push({ post_id: id, ok: false, error: `PUT ${updateRes.status}: ${errorText.slice(0, 160)}` });
+          continue;
+        }
+        await updateRes.text();
+        results.push({ post_id: id, ok: true, removed_chars: cleaned.removed.length });
+        await logCleanup(id, cleaned.removed.length);
+      } catch (e) {
+        results.push({ post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) });
       }
     }
-    const fixed = results.filter((r) => r.ok && (r.removed_chars ?? 0) > 0).length;
+
+    const fixed = results.filter((result) => result.ok && (result.removed_chars || 0) > 0).length;
     return jsonRes({ mode, attempted: results.length, fixed, results });
   }
 
