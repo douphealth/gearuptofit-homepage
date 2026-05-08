@@ -256,6 +256,84 @@ function Stat({ label, value, className = "" }: { label: string; value: number |
   );
 }
 
+function DiagnosticPanel({ diagnostics, loading, onRetry }: { diagnostics: Diagnostics | null; loading: boolean; onRetry: () => void }) {
+  const a = diagnostics?.authoritative;
+  const pages = diagnostics?.pages || [];
+  const missing = diagnostics?.missingFromCache || [];
+  return (
+    <Card className="mb-6">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <CardTitle className="text-base">WordPress Import Diagnostics</CardTitle>
+          <Button size="sm" variant="outline" onClick={onRetry} disabled={loading || !diagnostics?.run}>
+            <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} /> Retry missing pages
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+          <MiniStat label="WP total" value={a?.totalPublished ?? "—"} />
+          <MiniStat label="Cached" value={a?.cachedCount ?? "—"} />
+          <MiniStat label="Missing" value={a?.difference ?? "—"} className={a?.complete ? "text-emerald-500" : "text-destructive"} />
+          <MiniStat label="Pages" value={a ? `${pages.filter((p) => p.status === "success").length}/${a.totalPages}` : "—"} />
+          <MiniStat label="First gap" value={diagnostics?.firstMissingPage ?? "none"} />
+        </div>
+
+        {pages.length > 0 && (
+          <div className="overflow-x-auto border rounded-md">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40 text-left">
+                <tr>
+                  <th className="p-2">Page</th>
+                  <th className="p-2">Status</th>
+                  <th className="p-2">Retries</th>
+                  <th className="p-2">Imported</th>
+                  <th className="p-2">IDs</th>
+                  <th className="p-2">Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pages.map((p) => (
+                  <tr key={p.page} className="border-t">
+                    <td className="p-2 font-medium">{p.page}</td>
+                    <td className="p-2"><Badge variant={p.status === "success" ? "secondary" : p.status === "failed" ? "destructive" : "outline"}>{p.status}</Badge></td>
+                    <td className="p-2">{p.retry_count}</td>
+                    <td className="p-2">{p.imported_count}</td>
+                    <td className="p-2 text-muted-foreground max-w-xs truncate">{(p.post_ids || []).slice(0, 12).join(", ")}{(p.post_ids?.length || 0) > 12 ? "…" : ""}</td>
+                    <td className="p-2 text-destructive max-w-xs truncate">{p.error || ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {missing.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Missing from cache ({missing.length} shown)</div>
+            <div className="grid md:grid-cols-2 gap-2 text-xs">
+              {missing.slice(0, 60).map((m) => (
+                <div key={m.id} className="border rounded-md p-2">
+                  <span className="font-medium">#{m.id}</span> <span className="text-muted-foreground">/{m.slug}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MiniStat({ label, value, className = "" }: { label: string; value: number | string; className?: string }) {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="text-xs text-muted-foreground uppercase tracking-wide">{label}</div>
+      <div className={`text-xl font-bold ${className}`}>{value}</div>
+    </div>
+  );
+}
+
 function PostDrawer({ post, score, onClose }: { post: Post | null; score?: ScoreRow; onClose: () => void }) {
   const [fixes, setFixes] = useState<any>(null);
   const [busy, setBusy] = useState(false);
