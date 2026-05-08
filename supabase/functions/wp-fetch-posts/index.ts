@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
 
   if (mode === "fetch") {
     const page = Math.max(1, parseInt(body?.page ?? "1", 10));
-    const r = await fetch(`${WP_BASE}/posts?per_page=${PER_PAGE}&page=${page}&_embed=1&status=publish`, {
+    const r = await fetch(`${WP_BASE}/posts?per_page=${PER_PAGE}&page=${page}&status=publish&_fields=${FIELDS}`, {
       headers: { "User-Agent": "GearupAudit/1.0" },
     });
     if (!r.ok) {
