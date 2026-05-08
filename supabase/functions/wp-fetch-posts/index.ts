@@ -259,10 +259,15 @@ Deno.serve(async (req) => {
       const diagnostics = await getDiagnostics(supabase, runId);
       const page = Number(body?.page || diagnostics.firstMissingPage || 1);
       if (!page) return json({ done: true, ...diagnostics });
-      const fetched = await fetchPage(supabase, runId, page);
+      let fetched: { page: number; fetched: number } | { page: number; fetched: number; error: string };
+      try {
+        fetched = await fetchPage(supabase, runId, page);
+      } catch (error) {
+        fetched = { page, fetched: 0, error: error instanceof Error ? error.message : "Unknown page fetch error" };
+      }
       await updateRunSummary(supabase, runId);
       const next = await getDiagnostics(supabase, runId);
-      return json({ ...fetched, done: !next.firstMissingPage, ...next });
+      return json({ ...fetched, done: !next.firstMissingPage, ...next }, "error" in fetched ? 502 : 200);
     }
 
     if (mode === "retry") {
