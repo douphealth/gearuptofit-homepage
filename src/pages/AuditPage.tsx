@@ -84,14 +84,21 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         await loadScores((init.posts || []).map((p) => p.post_id));
       } else {
         const total = init.totalPages || 1;
+        let failed = 0;
         for (let page = 1; page <= total; page++) {
-          setProgress(`Fetching ${page}/${total}…`);
-          await callAudit("wp-fetch-posts", { mode: "fetch", page });
+          setProgress(`Fetching ${page}/${total}${failed ? ` (${failed} retried)` : ""}…`);
+          let ok = false;
+          for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+            try { await callAudit("wp-fetch-posts", { mode: "fetch", page }); ok = true; }
+            catch (err) { await new Promise((r) => setTimeout(r, 800 * (attempt + 1))); }
+          }
+          if (!ok) failed++;
         }
         setProgress("Loading…");
         const r = await callAudit<{ posts: Post[] }>("wp-fetch-posts", { mode: "results" });
         setPosts(r.posts || []);
         await loadScores((r.posts || []).map((p) => p.post_id));
+        if (failed) toast({ title: `${failed} pages failed`, description: "Click Refresh WP again to retry missing pages", variant: "destructive" });
       }
     } catch (e: any) { toast({ title: "Load failed", description: e.message, variant: "destructive" }); }
     setProgress("");
