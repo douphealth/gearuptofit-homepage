@@ -461,10 +461,10 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
 
               <Button onClick={pushDraft} disabled={pushing} className="w-full" variant="default">
                 {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Send className="size-4 mr-2" />}
-                Push as DRAFT to WordPress
+                Push title + suggestions to WordPress
               </Button>
               <p className="text-xs text-muted-foreground text-center">
-                Safe: writes status=draft only. Your live post won't change until you click Publish in wp-admin.
+                Safe: only title/excerpt update. Intro, FAQ, and JSON-LD are stored in post meta — apply them inside the wp-admin block editor to keep &lt;style&gt; and &lt;script&gt; tags intact.
               </p>
             </div>
           )}
