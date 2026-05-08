@@ -190,7 +190,6 @@ async function fetchPage(supabase: ReturnType<typeof createClient>, runId: strin
       .from("wp_import_pages")
       .update({
         status: "failed",
-        retry_count: supabase.rpc ? undefined : undefined,
         error: message,
         updated_at: new Date().toISOString(),
       })
