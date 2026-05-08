@@ -1,8 +1,10 @@
 import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
 
-function checkAuth(req: Request): boolean {
-  const pw = req.headers.get("x-audit-password");
+async function checkAuth(req: Request): Promise<boolean> {
+  let body: any = {};
+  try { body = await req.clone().json(); } catch { /* ignore */ }
+  const pw = body?._audit_password || req.headers.get("x-audit-password");
   return !!pw && pw === Deno.env.get("AUDIT_PASSWORD");
 }
 
