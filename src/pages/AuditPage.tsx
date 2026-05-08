@@ -335,7 +335,7 @@ function BulkCleanupPanel() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <CardTitle className="text-base">Site-wide CSS leak cleanup</CardTitle>
-            <p className="text-xs text-muted-foreground mt-1">Detects posts where raw <code>.gutf-article {`{...}`}</code> CSS shows as visible text and rewrites them. Live posts updated in place.</p>
+            <p className="text-xs text-muted-foreground mt-1">Fetches each post's <strong>rendered apex page</strong> and detects raw <code>.gutf-article {`{...}`}</code> CSS appearing as visible text (outside <code>&lt;style&gt;</code>). The leak is injected by the theme/Elementor at render time — fix re-saves the post to bust caches; persistent leaks need a manual edit in wp-admin → Custom CSS.</p>
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={scan} disabled={scanning || fixing}>
