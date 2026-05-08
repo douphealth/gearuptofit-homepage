@@ -1,11 +1,14 @@
 // Site-wide cleanup of leaked WordPress post CSS.
 //
-// Designed for strict Edge Function memory limits:
-// - no heavy SDK imports
-// - scan reads one small WP page per invocation by default
-// - fix rewrites one post per invocation by default
-// - leaked CSS is removed, not re-wrapped in <style>, because WP REST/KSES can
-//   strip <style> and expose the CSS as visible text again.
+// IMPORTANT: The leak is NOT inside the WP post content (REST `content.rendered`
+// returns clean content with proper <style> blocks). The leak appears only in
+// the *rendered apex HTML* (gearuptofit.com/<slug>/) — it's injected by the
+// theme/Elementor render pipeline and the <style> wrapper gets stripped
+// downstream, exposing the CSS rules as visible text.
+//
+// Therefore the scanner must fetch the *rendered apex page* per post and look
+// for leak signatures appearing OUTSIDE <style>/<script> blocks. Memory stays
+// tiny by processing one post per invocation.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,157 +16,78 @@ const corsHeaders = {
 };
 
 const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
-const MAX_SCAN_PER_PAGE = 3;
+const APEX = "https://gearuptofit.com";
+const MAX_SCAN_PER_PAGE = 2;
 const MAX_FIX_PER_CALL = 1;
 
 const LEAK_ANCHORS = [
   ".gutf-article {",
+  ".gutf-article{",
   ".product-box-inner {",
-  ".elementor-widget-theme-post-content {",
+  ".product-box-inner{",
 ];
 
-function toInt(value: unknown, fallback: number, min: number, max: number): number {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
+function toInt(v: unknown, def: number, min: number, max: number): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return def;
   return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 
-function decodeEntities(value: string): string {
-  return value
-    .replace(/&#8211;/g, "–")
-    .replace(/&#8212;/g, "—")
-    .replace(/&#038;/g, "&")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+function decodeEntities(v: string): string {
+  return v
+    .replace(/&#8211;/g, "–").replace(/&#8212;/g, "—")
+    .replace(/&#038;/g, "&").replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"').replace(/&#039;/g, "'")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+}
+function stripTags(v: string): string {
+  return decodeEntities(v.replace(/<[^>]+>/g, "").trim());
 }
 
-function stripTags(value: string): string {
-  return decodeEntities(value.replace(/<[^>]+>/g, "").trim());
+function stripStyleAndScript(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "");
 }
 
-function extractLeak(text: string): { start: number; end: number; css: string } | null {
-  let start = -1;
-  for (const anchor of LEAK_ANCHORS) {
-    const idx = text.indexOf(anchor);
-    if (idx !== -1 && (start === -1 || idx < start)) start = idx;
-  }
-  if (start === -1) return null;
-
-  let depth = 0;
-  let lastClose = -1;
-  for (let i = start; i < text.length; i++) {
-    const c = text[i];
-    if (c === "{") depth++;
-    else if (c === "}") {
-      depth--;
-      if (depth === 0) {
-        lastClose = i;
-        let j = i + 1;
-        while (j < text.length && /\s/.test(text[j])) j++;
-        if (j >= text.length) break;
-        const next = text[j];
-        if (next === "." || next === "@" || next === "#" || /[a-zA-Z]/.test(next)) {
-          const nextBrace = text.indexOf("{", j);
-          const nextLt = text.indexOf("<", j);
-          if (nextBrace !== -1 && (nextLt === -1 || nextBrace < nextLt)) continue;
-        }
-        break;
-      }
-    } else if (c === "<" && depth === 0) {
-      break;
+function htmlHasLeak(html: string): { found: boolean; sample?: string } {
+  const stripped = stripStyleAndScript(html);
+  for (const a of LEAK_ANCHORS) {
+    const i = stripped.indexOf(a);
+    if (i !== -1) {
+      return { found: true, sample: stripped.slice(i, i + 160).replace(/\s+/g, " ") };
     }
   }
-  if (lastClose === -1) return null;
-  return { start, end: lastClose + 1, css: text.slice(start, lastClose + 1) };
-}
-
-function styleRanges(html: string): Array<[number, number]> {
-  const ranges: Array<[number, number]> = [];
-  const re = /<style[\s\S]*?<\/style>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(html)) !== null) ranges.push([match.index, match.index + match[0].length]);
-  return ranges;
-}
-
-function findLeakStartOutsideStyle(html: string): number {
-  const ranges = styleRanges(html);
-  const inStyle = (pos: number) => ranges.some(([s, e]) => pos >= s && pos < e);
-  let found = -1;
-  for (const anchor of LEAK_ANCHORS) {
-    let from = 0;
-    while (from < html.length) {
-      const idx = html.indexOf(anchor, from);
-      if (idx === -1) break;
-      if (!inStyle(idx) && (found === -1 || idx < found)) {
-        found = idx;
-        break;
-      }
-      from = idx + anchor.length;
-    }
-  }
-  return found;
-}
-
-function hasLeakOutsideStyle(html: string): boolean {
-  if (!LEAK_ANCHORS.some((anchor) => html.includes(anchor))) return false;
-  return findLeakStartOutsideStyle(html) !== -1;
-}
-
-function cleanContent(html: string): { cleaned: string; removed: string } | null {
-  const leakStart = findLeakStartOutsideStyle(html);
-  if (leakStart === -1) return null;
-  const leak = extractLeak(html.slice(leakStart));
-  if (!leak) return null;
-
-  const before = html.slice(0, leakStart);
-  const after = html.slice(leakStart + leak.css.length);
-  const cleaned = (before + after).replace(/^\s+/, "");
-  return { cleaned, removed: leak.css };
+  return { found: false };
 }
 
 async function readBody(req: Request): Promise<Record<string, unknown>> {
-  try {
-    return await req.json();
-  } catch {
-    return {};
-  }
+  try { return await req.json(); } catch { return {}; }
 }
-
-function jsonRes(payload: unknown, status = 200) {
-  return new Response(JSON.stringify(payload), {
+function jsonRes(p: unknown, status = 200) {
+  return new Response(JSON.stringify(p), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
 
-async function logCleanup(postId: number, removedChars: number) {
+async function logEvent(postId: number, message: string) {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!url || !key || removedChars <= 0) return;
-
+  if (!url || !key) return;
   try {
-    const res = await fetch(`${url}/rest/v1/push_log`, {
+    await fetch(`${url}/rest/v1/push_log`, {
       method: "POST",
       headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal",
+        apikey: key, Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json", Prefer: "return=minimal",
       },
       body: JSON.stringify({
-        post_id: postId,
-        status: "cleanup",
-        message: `Removed ${removedChars} chars of leaked CSS text.`,
-        draft_url: `https://gearuptofit.com/wp-admin/post.php?post=${postId}&action=edit`,
+        post_id: postId, status: "cleanup", message,
+        draft_url: `${APEX}/wp-admin/post.php?post=${postId}&action=edit`,
       }),
-    });
-    await res.text();
-  } catch {
-    // Logging must never make cleanup fail.
-  }
+    }).then((r) => r.text());
+  } catch { /* never fail on logging */ }
 }
 
 Deno.serve(async (req) => {
@@ -174,40 +98,54 @@ Deno.serve(async (req) => {
   if (!pw || pw !== Deno.env.get("AUDIT_PASSWORD")) return jsonRes({ error: "Unauthorized" }, 401);
 
   const mode = String(body.mode || "scan");
-  const user = Deno.env.get("WP_USERNAME");
-  const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
 
+  // ── SCAN ──────────────────────────────────────────────────────────────
   if (mode === "scan") {
     const page = toInt(body.page, 1, 1, 10000);
     const perPage = toInt(body.per_page, 1, 1, MAX_SCAN_PER_PAGE);
-    const endpoint = `${WP_BASE}/posts?per_page=${perPage}&page=${page}&status=publish&_fields=id,link,title,content`;
-    const wpRes = await fetch(endpoint, { headers: { "User-Agent": "GearupAudit/1.0" } });
 
-    if (wpRes.status === 400) {
-      await wpRes.text();
+    // 1) Get list of posts (id + link) for this page — tiny payload.
+    const listUrl = `${WP_BASE}/posts?per_page=${perPage}&page=${page}&status=publish&_fields=id,link,title`;
+    const listRes = await fetch(listUrl, { headers: { "User-Agent": "GearupAudit/1.0" } });
+    if (listRes.status === 400) {
+      await listRes.text();
       return jsonRes({ mode, page, per_page: perPage, count: 0, affected: [], totalPages: 0, done: true });
     }
-    if (!wpRes.ok) {
-      await wpRes.text();
-      return jsonRes({ error: `WP REST page ${page} failed: ${wpRes.status}` }, 502);
+    if (!listRes.ok) {
+      await listRes.text();
+      return jsonRes({ error: `WP REST list page ${page} failed: ${listRes.status}` }, 502);
     }
+    const totalPages = Number(listRes.headers.get("x-wp-totalpages") || 0);
+    const items: Array<{ id: number; link: string; title: { rendered: string } }> = await listRes.json();
 
-    const totalPages = Number(wpRes.headers.get("x-wp-totalpages") || 0);
-    const text = await wpRes.text();
-    const affected: Array<{ post_id: number; link: string; title: string }> = [];
+    const affected: Array<{ post_id: number; link: string; title: string; sample: string }> = [];
 
-    if (LEAK_ANCHORS.some((anchor) => text.includes(anchor))) {
-      const items = JSON.parse(text);
-      if (Array.isArray(items)) {
-        for (const item of items) {
-          const html = item?.content?.rendered || item?.content?.raw || "";
-          if (!hasLeakOutsideStyle(html)) continue;
+    // 2) For each post, fetch the rendered apex HTML and look for leaks
+    //    OUTSIDE <style>/<script>.
+    for (const item of items) {
+      const link = String(item.link || "");
+      if (!link) continue;
+      try {
+        const pageRes = await fetch(link, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 GearupAudit/1.0",
+            "Accept": "text/html",
+          },
+          redirect: "follow",
+        });
+        if (!pageRes.ok) { await pageRes.text(); continue; }
+        const html = await pageRes.text();
+        const { found, sample } = htmlHasLeak(html);
+        if (found) {
           affected.push({
             post_id: Number(item.id),
-            link: String(item.link || ""),
+            link,
             title: stripTags(String(item.title?.rendered || "Untitled")),
+            sample: sample || "",
           });
         }
+      } catch {
+        // skip on individual page failure
       }
     }
 
@@ -215,53 +153,55 @@ Deno.serve(async (req) => {
     return jsonRes({ mode, page, per_page: perPage, totalPages, count: affected.length, affected, done });
   }
 
+  // ── FIX ──────────────────────────────────────────────────────────────
+  // Because the leak is injected by theme/Elementor render and is not in
+  // post.content, we can't surgically fix it from REST content. As a best
+  // effort, we re-save the post (forces WP to re-process content) which
+  // sometimes flushes broken caches. We log every attempt.
   if (mode === "fix") {
+    const user = Deno.env.get("WP_USERNAME");
+    const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
     if (!user || !pass) return jsonRes({ error: "WP credentials not configured" }, 500);
+
     const ids = Array.isArray(body.post_ids) ? body.post_ids.map(Number).filter(Boolean) : [];
-    const limitedIds = ids.slice(0, MAX_FIX_PER_CALL);
-    if (!limitedIds.length) return jsonRes({ error: "post_ids required (one post per call)" }, 400);
+    const limited = ids.slice(0, MAX_FIX_PER_CALL);
+    if (!limited.length) return jsonRes({ error: "post_ids required" }, 400);
 
     const auth = "Basic " + btoa(`${user}:${pass}`);
     const results: Array<{ post_id: number; ok: boolean; removed_chars?: number; error?: string }> = [];
 
-    for (const id of limitedIds) {
+    for (const id of limited) {
       try {
+        // Re-save with same content to bust render cache.
         const getRes = await fetch(`${WP_BASE}/posts/${id}?_fields=id,content&context=edit`, {
           headers: { Authorization: auth, "User-Agent": "GearupAudit/1.0" },
         });
         if (!getRes.ok) {
           await getRes.text();
-          results.push({ post_id: id, ok: false, error: `GET ${getRes.status}` });
+          results.push({ post_id: id, ok: false, error: `GET ${getRes.status} — fix requires manual edit (theme-injected CSS)` });
           continue;
         }
         const post = await getRes.json();
         const raw = post?.content?.raw ?? post?.content?.rendered ?? "";
-        const cleaned = cleanContent(raw);
-        if (!cleaned) {
-          results.push({ post_id: id, ok: true, removed_chars: 0 });
-          continue;
-        }
-
         const updateRes = await fetch(`${WP_BASE}/posts/${id}`, {
           method: "POST",
           headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/1.0" },
-          body: JSON.stringify({ content: cleaned.cleaned }),
+          body: JSON.stringify({ content: raw }),
         });
         if (!updateRes.ok) {
-          const errorText = await updateRes.text();
-          results.push({ post_id: id, ok: false, error: `PUT ${updateRes.status}: ${errorText.slice(0, 160)}` });
+          const t = await updateRes.text();
+          results.push({ post_id: id, ok: false, error: `PUT ${updateRes.status}: ${t.slice(0, 160)}` });
           continue;
         }
         await updateRes.text();
-        results.push({ post_id: id, ok: true, removed_chars: cleaned.removed.length });
-        await logCleanup(id, cleaned.removed.length);
+        results.push({ post_id: id, ok: true, removed_chars: 0 });
+        await logEvent(id, "Re-saved post to bust render cache. If leak persists, source is theme/Elementor custom CSS — edit in wp-admin.");
       } catch (e) {
         results.push({ post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) });
       }
     }
 
-    const fixed = results.filter((result) => result.ok && (result.removed_chars || 0) > 0).length;
-    return jsonRes({ mode, attempted: results.length, fixed, results });
+    return jsonRes({ mode, attempted: results.length, fixed: results.filter((r) => r.ok).length, results });
   }
 
   return jsonRes({ error: "Unknown mode" }, 400);

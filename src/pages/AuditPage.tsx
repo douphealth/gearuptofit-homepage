@@ -276,7 +276,7 @@ function Stat({ label, value, className = "" }: { label: string; value: number |
   );
 }
 
-type LeakItem = { post_id: number; link: string; title: string };
+type LeakItem = { post_id: number; link: string; title: string; sample?: string };
 type FixResult = { post_id: number; ok: boolean; removed_chars?: number; error?: string };
 
 function BulkCleanupPanel() {
@@ -310,7 +310,7 @@ function BulkCleanupPanel() {
 
   const fixAll = async () => {
     if (!items || items.length === 0) return;
-    if (!confirm(`Clean ${items.length} posts? This rewrites the published content of each affected post (removes the leaked CSS text and re-wraps the rules in a proper <style> block). The site stays live throughout.`)) return;
+    if (!confirm(`Re-save ${items.length} posts? This re-publishes each affected post via the WordPress REST API to bust render caches. The actual leak source is theme/Elementor custom CSS injected at render time — if the leak persists after re-save, the post needs to be opened in wp-admin and the broken Custom CSS block removed manually. The site stays live throughout.`)) return;
     setFixing(true);
     try {
       const ids = items.map((i) => i.post_id);
@@ -335,7 +335,7 @@ function BulkCleanupPanel() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <CardTitle className="text-base">Site-wide CSS leak cleanup</CardTitle>
-            <p className="text-xs text-muted-foreground mt-1">Detects posts where raw <code>.gutf-article {`{...}`}</code> CSS shows as visible text and rewrites them. Live posts updated in place.</p>
+            <p className="text-xs text-muted-foreground mt-1">Fetches each post's <strong>rendered apex page</strong> and detects raw <code>.gutf-article {`{...}`}</code> CSS appearing as visible text (outside <code>&lt;style&gt;</code>). The leak is injected by the theme/Elementor at render time — fix re-saves the post to bust caches; persistent leaks need a manual edit in wp-admin → Custom CSS.</p>
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={scan} disabled={scanning || fixing}>
