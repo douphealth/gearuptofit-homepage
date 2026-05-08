@@ -371,7 +371,7 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
 
   const pushDraft = async () => {
     if (!fixes) return;
-    if (!confirm("Push these changes as a DRAFT to WordPress? Your live post will NOT change until you publish in wp-admin.")) return;
+    if (!confirm("Push AI suggestions to WordPress?\n\nSAFE MODE: only the post title and excerpt are updated. The full intro/FAQ/JSON-LD bundle is stored in post meta `_gutf_ai_suggestions` for you to apply manually inside the wp-admin block editor (this preserves <style>/<script> tags). The live content is NOT changed.")) return;
     setPushing(true);
     try {
       const r = await callAudit<{ draft_url: string; message: string }>("wp-push-draft", {
@@ -381,6 +381,19 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
       toast({ title: "Draft pushed", description: r.message });
       if (r.draft_url) window.open(r.draft_url, "_blank");
     } catch (e: any) { toast({ title: "Push failed", description: e.message, variant: "destructive" }); }
+    setPushing(false);
+  };
+
+  const revertDraft = async () => {
+    if (!confirm("Revert this post's draft to match the current LIVE content? Use this if a previous push corrupted the draft (e.g. raw CSS showing). The live post is NOT changed.")) return;
+    setPushing(true);
+    try {
+      const r = await callAudit<{ ok: boolean; message?: string }>("wp-push-draft", {
+        post_id: post.post_id,
+        mode: "revert",
+      });
+      toast({ title: r.ok ? "Draft reverted" : "Revert failed", description: r.message || "" });
+    } catch (e: any) { toast({ title: "Revert failed", description: e.message, variant: "destructive" }); }
     setPushing(false);
   };
 
@@ -396,6 +409,9 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
             <a href={post.link} target="_blank" rel="noreferrer" className="text-sm text-primary inline-flex items-center gap-1">
               View live <ExternalLink className="size-3" />
             </a>
+            <Button onClick={revertDraft} disabled={pushing} variant="outline" size="sm" className="ml-auto">
+              Revert draft to live
+            </Button>
           </div>
 
           {score?.issues && score.issues.length > 0 && (
@@ -445,10 +461,10 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
 
               <Button onClick={pushDraft} disabled={pushing} className="w-full" variant="default">
                 {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Send className="size-4 mr-2" />}
-                Push as DRAFT to WordPress
+                Push title + suggestions to WordPress
               </Button>
               <p className="text-xs text-muted-foreground text-center">
-                Safe: writes status=draft only. Your live post won't change until you click Publish in wp-admin.
+                Safe: only title/excerpt update. Intro, FAQ, and JSON-LD are stored in post meta — apply them inside the wp-admin block editor to keep &lt;style&gt; and &lt;script&gt; tags intact.
               </p>
             </div>
           )}
