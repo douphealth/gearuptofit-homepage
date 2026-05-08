@@ -149,6 +149,26 @@ Deno.serve(async (req) => {
     : [];
   const refreshAll = body?.refresh_all === true;
 
+  if (body?.mode === "list") {
+    const requestedIds = Array.isArray(body?.post_ids)
+      ? body.post_ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id)).slice(0, 5000)
+      : [];
+    const scoresQuery = supabase
+      .from("audit_scores")
+      .select("post_id, score, issues, metrics, scanned_at");
+    const { data, error: scoresError } = requestedIds.length
+      ? await scoresQuery.in("post_id", requestedIds)
+      : await scoresQuery.range(0, 4999);
+    if (scoresError) {
+      return new Response(JSON.stringify({ error: scoresError.message }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ scores: data || [] }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   let query = supabase
     .from("wp_posts_cache")
     .select("post_id, slug, title, link, modified_at, data");
