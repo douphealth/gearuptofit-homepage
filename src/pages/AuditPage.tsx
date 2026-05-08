@@ -276,6 +276,103 @@ function Stat({ label, value, className = "" }: { label: string; value: number |
   );
 }
 
+type LeakItem = { post_id: number; link: string; title: string; preview: string };
+type FixResult = { post_id: number; ok: boolean; removed_chars?: number; error?: string };
+
+function BulkCleanupPanel() {
+  const [scanning, setScanning] = useState(false);
+  const [fixing, setFixing] = useState(false);
+  const [items, setItems] = useState<LeakItem[] | null>(null);
+  const [results, setResults] = useState<FixResult[] | null>(null);
+
+  const scan = async () => {
+    setScanning(true); setResults(null);
+    try {
+      const r = await callAudit<{ count: number; affected: LeakItem[] }>("wp-bulk-cleanup", { mode: "scan" });
+      setItems(r.affected);
+      toast({ title: `Scan complete`, description: `${r.count} posts contain leaked CSS.` });
+    } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
+    setScanning(false);
+  };
+
+  const fixAll = async () => {
+    if (!items || items.length === 0) return;
+    if (!confirm(`Clean ${items.length} posts? This rewrites the published content of each affected post (removes the leaked CSS text and re-wraps the rules in a proper <style> block). The site stays live throughout.`)) return;
+    setFixing(true);
+    try {
+      const ids = items.map((i) => i.post_id);
+      // Process in batches of 20 to keep each invocation under the worker budget.
+      const all: FixResult[] = [];
+      for (let i = 0; i < ids.length; i += 20) {
+        const batch = ids.slice(i, i + 20);
+        const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: batch, limit: 20 });
+        all.push(...r.results);
+      }
+      setResults(all);
+      const ok = all.filter((r) => r.ok && (r.removed_chars ?? 0) > 0).length;
+      const failed = all.filter((r) => !r.ok).length;
+      toast({ title: `Cleanup done`, description: `${ok} fixed, ${failed} failed.` });
+      // Re-scan to confirm.
+      await scan();
+    } catch (e: any) { toast({ title: "Cleanup failed", description: e.message, variant: "destructive" }); }
+    setFixing(false);
+  };
+
+  return (
+    <Card className="mb-6 border-destructive/40">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle className="text-base">Site-wide CSS leak cleanup</CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">Detects posts where raw <code>.gutf-article {`{...}`}</code> CSS shows as visible text and rewrites them. Live posts updated in place.</p>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={scan} disabled={scanning || fixing}>
+              {scanning ? <Loader2 className="size-4 animate-spin mr-2" /> : <RefreshCw className="size-4 mr-2" />}
+              Scan all posts
+            </Button>
+            <Button size="sm" variant="destructive" onClick={fixAll} disabled={fixing || scanning || !items || items.length === 0}>
+              {fixing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
+              Fix {items?.length ?? 0} posts
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      {(items || results) && (
+        <CardContent className="space-y-3">
+          {items && items.length === 0 && (
+            <div className="text-sm text-emerald-500">No posts contain leaked CSS. ✓</div>
+          )}
+          {items && items.length > 0 && (
+            <div className="overflow-x-auto border rounded-md max-h-72">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 text-left sticky top-0">
+                  <tr><th className="p-2">ID</th><th className="p-2">Title</th><th className="p-2">Result</th></tr>
+                </thead>
+                <tbody>
+                  {items.map((it) => {
+                    const res = results?.find((r) => r.post_id === it.post_id);
+                    return (
+                      <tr key={it.post_id} className="border-t">
+                        <td className="p-2 font-medium">{it.post_id}</td>
+                        <td className="p-2"><a className="text-primary hover:underline" href={it.link} target="_blank" rel="noreferrer">{it.title}</a></td>
+                        <td className="p-2">
+                          {res ? (res.ok ? <span className="text-emerald-500">✓ removed {res.removed_chars}c</span> : <span className="text-destructive">✗ {res.error}</span>) : <span className="text-muted-foreground">pending</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+
 function DiagnosticPanel({ diagnostics, loading, onRetry }: { diagnostics: Diagnostics | null; loading: boolean; onRetry: () => void }) {
   const a = diagnostics?.authoritative;
   const pages = diagnostics?.pages || [];
