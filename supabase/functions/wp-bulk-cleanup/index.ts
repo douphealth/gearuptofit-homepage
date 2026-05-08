@@ -1,23 +1,22 @@
-// Site-wide cleanup of leaked WordPress post CSS.
+// Site-wide cleanup of leaked WordPress CSS.
 //
-// IMPORTANT: The leak is NOT inside the WP post content (REST `content.rendered`
-// returns clean content with proper <style> blocks). The leak appears only in
-// the *rendered apex HTML* (gearuptofit.com/<slug>/) — it's injected by the
-// theme/Elementor render pipeline and the <style> wrapper gets stripped
-// downstream, exposing the CSS rules as visible text.
+// Root cause: the visible `.gutf-article { ... }` text was created by globally
+// published Elementor snippets. One duplicate snippet injected the CSS without
+// a <style> wrapper, so every apex-domain post rendered the rules as text. Post
+// re-saves cannot fix this because the bad source is global snippet metadata,
+// not individual post content.
 //
-// Therefore the scanner must fetch the *rendered apex page* per post and look
-// for leak signatures appearing OUTSIDE <style>/<script> blocks. Memory stays
-// tiny by processing one post per invocation.
+// This function now scans/fixes the source: published Elementor snippets whose
+// code is raw article-layout CSS or the duplicated "Post Layout Fix" snippets.
+// It avoids full-site HTML crawling to stay below worker memory limits.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
+const WP_BASE = "https://origin.gearuptofit.com/wp-json/wp/v2";
 const APEX = "https://gearuptofit.com";
-const MAX_SCAN_PER_PAGE = 2;
 const MAX_FIX_PER_CALL = 1;
 
 const LEAK_ANCHORS = [
@@ -26,6 +25,14 @@ const LEAK_ANCHORS = [
   ".product-box-inner {",
   ".product-box-inner{",
 ];
+
+type Snippet = {
+  id: number;
+  slug?: string;
+  status?: string;
+  title?: { raw?: string; rendered?: string };
+  meta?: Record<string, unknown>;
+};
 
 function toInt(v: unknown, def: number, min: number, max: number): number {
   const n = Number(v);
@@ -50,8 +57,28 @@ function stripStyleAndScript(html: string): string {
     .replace(/<script[\s\S]*?<\/script>/gi, "");
 }
 
+function codeHasRawCssLeak(code: string): boolean {
+  const trimmed = code.trim();
+  if (!trimmed) return false;
+  if (/^<style\b[\s\S]*<\/style>\s*$/i.test(trimmed)) return false;
+  return LEAK_ANCHORS.some((a) => trimmed.includes(a));
+}
+
+function snippetTitle(item: Snippet): string {
+  return stripTags(String(item.title?.raw || item.title?.rendered || "Untitled snippet"));
+}
+
+function snippetHasLeak(item: Snippet): { found: boolean; sample?: string; reason?: string } {
+  const code = String(item.meta?._elementor_code || "");
+  if (codeHasRawCssLeak(code)) {
+    return { found: true, reason: "raw CSS missing <style> wrapper", sample: code.slice(0, 180).replace(/\s+/g, " ") };
+  }
+  return { found: false };
+}
+
 function htmlHasLeak(html: string): { found: boolean; sample?: string } {
-  const stripped = stripStyleAndScript(html);
+  const withoutStyles = stripStyleAndScript(html);
+  const stripped = withoutStyles.replace(/<!--[\s\S]*?-->/g, "");
   for (const a of LEAK_ANCHORS) {
     const i = stripped.indexOf(a);
     if (i !== -1) {
@@ -101,63 +128,34 @@ Deno.serve(async (req) => {
 
   // ── SCAN ──────────────────────────────────────────────────────────────
   if (mode === "scan") {
-    const page = toInt(body.page, 1, 1, 10000);
-    const perPage = toInt(body.per_page, 1, 1, MAX_SCAN_PER_PAGE);
+    const authUser = Deno.env.get("WP_USERNAME");
+    const authPass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
+    const headers: Record<string, string> = { "User-Agent": "GearupAudit/1.0", "Accept": "application/json" };
+    if (authUser && authPass) headers.Authorization = "Basic " + btoa(`${authUser}:${authPass}`);
 
-    // 1) Get list of posts (id + link) for this page — tiny payload.
-    const listUrl = `${WP_BASE}/posts?per_page=${perPage}&page=${page}&status=publish&_fields=id,link,title`;
-    const listRes = await fetch(listUrl, { headers: { "User-Agent": "GearupAudit/1.0" } });
-    if (listRes.status === 400) {
-      await listRes.text();
-      return jsonRes({ mode, page, per_page: perPage, count: 0, affected: [], totalPages: 0, done: true });
-    }
-    if (!listRes.ok) {
-      await listRes.text();
-      return jsonRes({ error: `WP REST list page ${page} failed: ${listRes.status}` }, 502);
-    }
-    const totalPages = Number(listRes.headers.get("x-wp-totalpages") || 0);
-    const items: Array<{ id: number; link: string; title: { rendered: string } }> = await listRes.json();
-
-    const affected: Array<{ post_id: number; link: string; title: string; sample: string }> = [];
-
-    // 2) For each post, fetch the rendered apex HTML and look for leaks
-    //    OUTSIDE <style>/<script>.
-    for (const item of items) {
-      const link = String(item.link || "");
-      if (!link) continue;
-      try {
-        const pageRes = await fetch(link, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 GearupAudit/1.0",
-            "Accept": "text/html",
-          },
-          redirect: "follow",
-        });
-        if (!pageRes.ok) { await pageRes.text(); continue; }
-        const html = await pageRes.text();
-        const { found, sample } = htmlHasLeak(html);
-        if (found) {
-          affected.push({
-            post_id: Number(item.id),
-            link,
-            title: stripTags(String(item.title?.rendered || "Untitled")),
-            sample: sample || "",
-          });
-        }
-      } catch {
-        // skip on individual page failure
-      }
+    const res = await fetch(`${WP_BASE}/elementor_snippet?per_page=100&status=publish&context=edit&_fields=id,slug,status,title,meta`, { headers });
+    if (!res.ok) {
+      const text = await res.text();
+      return jsonRes({ error: `Elementor snippet scan failed: ${res.status} ${text.slice(0, 160)}` }, 502);
     }
 
-    const done = totalPages > 0 ? page >= totalPages : false;
-    return jsonRes({ mode, page, per_page: perPage, totalPages, count: affected.length, affected, done });
+    const snippets: Snippet[] = await res.json();
+    const affected = snippets.flatMap((item) => {
+      const leak = snippetHasLeak(item);
+      if (!leak.found) return [];
+      return [{
+        post_id: Number(item.id),
+        link: `${APEX}/wp-admin/post.php?post=${Number(item.id)}&action=edit`,
+        title: snippetTitle(item),
+        sample: `${leak.reason}: ${leak.sample || ""}`,
+      }];
+    });
+
+    return jsonRes({ mode, page: 1, per_page: snippets.length, totalPages: 1, count: affected.length, affected, done: true });
   }
 
   // ── FIX ──────────────────────────────────────────────────────────────
-  // Because the leak is injected by theme/Elementor render and is not in
-  // post.content, we can't surgically fix it from REST content. As a best
-  // effort, we re-save the post (forces WP to re-process content) which
-  // sometimes flushes broken caches. We log every attempt.
+  // Fix the actual global source by drafting the offending Elementor snippets.
   if (mode === "fix") {
     const user = Deno.env.get("WP_USERNAME");
     const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
@@ -172,30 +170,34 @@ Deno.serve(async (req) => {
 
     for (const id of limited) {
       try {
-        // Re-save with same content to bust render cache.
-        const getRes = await fetch(`${WP_BASE}/posts/${id}?_fields=id,content&context=edit`, {
+        const getRes = await fetch(`${WP_BASE}/elementor_snippet/${id}?context=edit&_fields=id,title,meta,status`, {
           headers: { Authorization: auth, "User-Agent": "GearupAudit/1.0" },
         });
         if (!getRes.ok) {
           await getRes.text();
-          results.push({ post_id: id, ok: false, error: `GET ${getRes.status} — fix requires manual edit (theme-injected CSS)` });
+          results.push({ post_id: id, ok: false, error: `GET snippet ${getRes.status}` });
           continue;
         }
-        const post = await getRes.json();
-        const raw = post?.content?.raw ?? post?.content?.rendered ?? "";
-        const updateRes = await fetch(`${WP_BASE}/posts/${id}`, {
+        const snippet: Snippet = await getRes.json();
+        const leak = snippetHasLeak(snippet);
+        if (!leak.found) {
+          results.push({ post_id: id, ok: true, removed_chars: 0 });
+          continue;
+        }
+        const removed = String(snippet.meta?._elementor_code || "").length;
+        const updateRes = await fetch(`${WP_BASE}/elementor_snippet/${id}`, {
           method: "POST",
           headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/1.0" },
-          body: JSON.stringify({ content: raw }),
+          body: JSON.stringify({ status: "draft" }),
         });
         if (!updateRes.ok) {
           const t = await updateRes.text();
-          results.push({ post_id: id, ok: false, error: `PUT ${updateRes.status}: ${t.slice(0, 160)}` });
+          results.push({ post_id: id, ok: false, error: `Draft snippet failed ${updateRes.status}: ${t.slice(0, 160)}` });
           continue;
         }
         await updateRes.text();
-        results.push({ post_id: id, ok: true, removed_chars: 0 });
-        await logEvent(id, "Re-saved post to bust render cache. If leak persists, source is theme/Elementor custom CSS — edit in wp-admin.");
+        results.push({ post_id: id, ok: true, removed_chars: removed });
+        await logEvent(id, `Drafted leaking Elementor snippet: ${snippetTitle(snippet)}`);
       } catch (e) {
         results.push({ post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) });
       }
