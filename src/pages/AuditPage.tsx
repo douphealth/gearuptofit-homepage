@@ -141,6 +141,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     setLoading(false);
   };
 
+  // Parallel scan: 20 concurrent workers, scan in chunks of 10 per call.
+  // For 200 posts at ~1.5s/post → ~15-30s total.
   const runScan = async () => {
     if (!posts.length) {
       toast({ title: "No cached posts", description: "Run Refresh WP first." });
@@ -148,15 +150,27 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     }
     setScanning(true);
     try {
+      const total = posts.length;
       let scanned = 0;
-      const batchSize = 5;
-      for (let i = 0; i < posts.length; i += batchSize) {
-        const batch = posts.slice(i, i + batchSize).map((p) => p.post_id);
-        setProgress(`Scoring ${Math.min(i + batchSize, posts.length)}/${posts.length}…`);
-        const r = await callAudit<{ scanned: number }>("audit-score", { post_ids: batch });
-        scanned += r.scanned || 0;
-      }
-      toast({ title: `Scanned ${scanned} posts`, description: "Scores updated in safe batches" });
+      const CHUNK = 10;       // posts per edge call
+      const CONCURRENCY = 4;  // parallel edge calls (40 posts in flight)
+      const offsets: number[] = [];
+      for (let o = 0; o < total; o += CHUNK) offsets.push(o);
+
+      let cursor = 0;
+      const workers = Array.from({ length: CONCURRENCY }, async () => {
+        while (cursor < offsets.length) {
+          const my = offsets[cursor++];
+          if (my === undefined) return;
+          try {
+            const r = await callAudit<{ scanned: number }>("audit-score", { mode: "scan_all", offset: my, limit: CHUNK });
+            scanned += r.scanned || 0;
+            setProgress(`Scored ${Math.min(scanned, total)}/${total}…`);
+          } catch (e) { /* continue */ }
+        }
+      });
+      await Promise.all(workers);
+      toast({ title: `Scanned ${scanned} posts`, description: "All scores updated in parallel." });
       await load();
     } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
     setProgress("");
