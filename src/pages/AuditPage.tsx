@@ -86,31 +86,44 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     setLoading(true);
     setProgress("");
     try {
-      const init = await callAudit<{ posts?: Post[]; totalPages?: number; needsFetch?: boolean }>(
-        "wp-fetch-posts", { mode: "list", force },
-      );
-      if (!init.needsFetch) {
-        setPosts(init.posts || []);
-        await loadScores((init.posts || []).map((p) => p.post_id));
-      } else {
-        const total = init.totalPages || 1;
-        let failed = 0;
-        for (let page = 1; page <= total; page++) {
-          setProgress(`Fetching ${page}/${total}${failed ? ` (${failed} retried)` : ""}…`);
-          let ok = false;
-          for (let attempt = 0; attempt < 3 && !ok; attempt++) {
-            try { await callAudit("wp-fetch-posts", { mode: "fetch", page }); ok = true; }
-            catch (err) { await new Promise((r) => setTimeout(r, 800 * (attempt + 1))); }
-          }
-          if (!ok) failed++;
+      let state = await callAudit<Diagnostics & { posts?: Post[] }>("wp-fetch-posts", { mode: force ? "start" : "list" });
+      setDiagnostics(state);
+      if (force) {
+        const runId = state.run?.id;
+        if (!runId) throw new Error("Import run could not start");
+        while (state.firstMissingPage) {
+          const total = state.authoritative?.totalPages || state.run?.expected_pages || "?";
+          setProgress(`Fetching page ${state.firstMissingPage}/${total}…`);
+          state = await callAudit<Diagnostics & { done?: boolean }>("wp-fetch-posts", { mode: "continue", run_id: runId });
+          setDiagnostics(state);
+          if (state.run?.status === "failed") break;
         }
-        setProgress("Loading…");
-        const r = await callAudit<{ posts: Post[] }>("wp-fetch-posts", { mode: "results" });
-        setPosts(r.posts || []);
-        await loadScores((r.posts || []).map((p) => p.post_id));
-        if (failed) toast({ title: `${failed} pages failed`, description: "Click Refresh WP again to retry missing pages", variant: "destructive" });
       }
+      setProgress("Loading…");
+      const r = await callAudit<Diagnostics & { posts: Post[] }>("wp-fetch-posts", { mode: "results", run_id: state.run?.id });
+      setDiagnostics(r);
+      setPosts(r.posts || []);
+      await loadScores((r.posts || []).map((p) => p.post_id));
+      if (r.authoritative && !r.authoritative.complete) toast({ title: `${r.authoritative.difference} posts still missing`, description: "Diagnostics shows the first missing page and missing IDs.", variant: "destructive" });
     } catch (e: any) { toast({ title: "Load failed", description: e.message, variant: "destructive" }); }
+    setProgress("");
+    setLoading(false);
+  };
+
+  const retryMissing = async () => {
+    setLoading(true);
+    try {
+      let state = await callAudit<Diagnostics>("wp-fetch-posts", { mode: "retry", run_id: diagnostics?.run?.id });
+      setDiagnostics(state);
+      const runId = state.run?.id;
+      while (runId && state.firstMissingPage) {
+        setProgress(`Retrying page ${state.firstMissingPage}/${state.authoritative?.totalPages || "?"}…`);
+        state = await callAudit<Diagnostics>("wp-fetch-posts", { mode: "continue", run_id: runId });
+        setDiagnostics(state);
+        if (state.run?.status === "failed") break;
+      }
+      await load(false);
+    } catch (e: any) { toast({ title: "Retry failed", description: e.message, variant: "destructive" }); }
     setProgress("");
     setLoading(false);
   };
