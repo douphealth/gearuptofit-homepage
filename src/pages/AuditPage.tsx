@@ -65,7 +65,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const load = async (force = false) => {
     setLoading(true);
     try {
-      const r = await callAudit<{ posts: Post[] }>("wp-fetch-posts", { method: "GET", query: force ? { force: "1" } : {} });
+      const r = await callAudit<{ posts: Post[] }>("wp-fetch-posts", force ? { force: true } : {});
       setPosts(r.posts || []);
       // also fetch scores via direct supabase
       const ids = (r.posts || []).map((p) => p.post_id);
@@ -83,7 +83,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const runScan = async () => {
     setScanning(true);
     try {
-      const r = await callAudit<{ scanned: number; avgScore: number }>("audit-score", { method: "POST", body: {} });
+      const r = await callAudit<{ scanned: number; avgScore: number }>("audit-score", {});
       toast({ title: `Scanned ${r.scanned} posts`, description: `Avg score ${r.avgScore}` });
       await load();
     } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
@@ -210,7 +210,7 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
   const generate = async () => {
     setBusy(true);
     try {
-      const r = await callAudit<{ fixes: any }>("audit-generate-fixes", { method: "POST", body: { post_id: post.post_id } });
+      const r = await callAudit<{ fixes: any }>("audit-generate-fixes", { post_id: post.post_id });
       setFixes(r.fixes);
     } catch (e: any) { toast({ title: "AI failed", description: e.message, variant: "destructive" }); }
     setBusy(false);
@@ -228,14 +228,11 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
       const original = post.data?.content?.rendered || "";
       const newContent = `${intro}\n${original}\n<h2>Frequently Asked Questions</h2>\n${faqHtml}\n${jsonLd}`;
       const r = await callAudit<{ draft_url: string; message: string }>("wp-push-draft", {
-        method: "POST",
-        body: {
-          post_id: post.post_id,
-          payload: {
-            title: fixes.metaTitle || undefined,
-            content: newContent,
-            excerpt: fixes.metaDescription || undefined,
-          },
+        post_id: post.post_id,
+        payload: {
+          title: fixes.metaTitle || undefined,
+          content: newContent,
+          excerpt: fixes.metaDescription || undefined,
         },
       });
       toast({ title: "Draft pushed", description: r.message });

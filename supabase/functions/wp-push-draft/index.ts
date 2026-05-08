@@ -3,14 +3,16 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
 
 const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
 
-function checkAuth(req: Request): boolean {
-  const pw = req.headers.get("x-audit-password");
+async function checkAuth(req: Request): Promise<boolean> {
+  let body: any = {};
+  try { body = await req.clone().json(); } catch { /* ignore */ }
+  const pw = body?._audit_password || req.headers.get("x-audit-password");
   return !!pw && pw === Deno.env.get("AUDIT_PASSWORD");
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (!checkAuth(req)) {
+  if (!(await checkAuth(req))) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
