@@ -71,8 +71,13 @@ Deno.serve(async (req) => {
   try { result = JSON.parse(text); } catch { result = { raw: text }; }
 
   const status = r.ok ? "success" : "error";
-  const draft_url = result?.link ? `${result.link}?preview=true` : null;
-  const message = r.ok ? `Draft updated for post ${post_id}` : `WP error ${r.status}: ${result?.message || text.slice(0, 200)}`;
+  // Drafts are NOT publicly viewable. Send the user to the wp-admin edit screen instead.
+  const draft_url = r.ok
+    ? `https://gearuptofit.com/wp-admin/post.php?post=${post_id}&action=edit`
+    : null;
+  const message = r.ok
+    ? `Draft updated. Open it in wp-admin to review & publish.`
+    : `WP error ${r.status}: ${result?.message || text.slice(0, 200)}`;
 
   await supabase.from("push_log").insert({ post_id, status, message, draft_url });
 
