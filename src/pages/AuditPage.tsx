@@ -13,6 +13,15 @@ import {
 type Issue = { severity: "critical" | "high" | "polish"; code: string; message: string };
 type ScoreRow = { post_id: number; score: number; issues: Issue[]; metrics: any; scanned_at: string };
 type Post = { post_id: number; slug: string; title: string; link: string; modified_at: string };
+type ImportPage = { page: number; status: string; retry_count: number; imported_count: number; post_ids?: number[]; error?: string | null };
+type MissingPost = { id: number; slug: string; title?: string };
+type Diagnostics = {
+  authoritative?: { totalPublished: number; totalPages: number; perPage: number; cachedCount: number; difference: number; complete: boolean };
+  run?: { id: string; status: string; expected_total: number; expected_pages: number; imported_total: number; first_missing_page?: number | null; updated_at?: string } | null;
+  pages?: ImportPage[];
+  firstMissingPage?: number | null;
+  missingFromCache?: MissingPost[];
+};
 
 function sevColor(s: Issue["severity"]) {
   return s === "critical" ? "destructive" : s === "high" ? "default" : "secondary";
@@ -62,6 +71,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [sevFilter, setSevFilter] = useState<"all" | "critical" | "high">("all");
   const [selected, setSelected] = useState<Post | null>(null);
   const [progress, setProgress] = useState<string>("");
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
 
   const loadScores = async (ids: number[]) => {
     if (!ids.length) { setScores({}); return; }
