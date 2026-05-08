@@ -755,6 +755,93 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
             </Card>
           )}
 
+          {cwv && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  Core Web Vitals
+                  <Badge variant={cwv.score >= 80 ? "default" : cwv.score >= 60 ? "secondary" : "destructive"}>
+                    {cwv.score}/100
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-xs grid grid-cols-3 gap-3">
+                <div>
+                  <div className="font-semibold mb-1">LCP</div>
+                  <div className="text-muted-foreground">Hero priority: {cwv.lcp?.heroFetchPriority ? "✓" : "✗"}</div>
+                  <div className="text-muted-foreground">Hero lazy: {cwv.lcp?.heroLazy ? "⚠ yes" : "✓ no"}</div>
+                  <div className="text-muted-foreground">Format: {cwv.lcp?.heroFormat}</div>
+                  <div className="text-muted-foreground">Eager above-fold: {cwv.lcp?.eagerAboveFold}</div>
+                </div>
+                <div>
+                  <div className="font-semibold mb-1">CLS</div>
+                  <div className="text-muted-foreground">Imgs no-dims: {cwv.cls?.imagesMissingDims}</div>
+                  <div className="text-muted-foreground">Iframes no-dims: {cwv.cls?.iframesMissingDims}</div>
+                  <div className="text-muted-foreground">Ads no-reserve: {cwv.cls?.adsWithoutReserve}</div>
+                </div>
+                <div>
+                  <div className="font-semibold mb-1">INP</div>
+                  <div className="text-muted-foreground">Inline scripts: {cwv.inp?.inlineScripts}</div>
+                  <div className="text-muted-foreground">Heavy: {cwv.inp?.heavyInlineScripts}</div>
+                  <div className="text-muted-foreground">Blocking: {cwv.inp?.blockingScripts}</div>
+                  <div className="text-muted-foreground">DOM nodes: {cwv.domNodes}</div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Internal linking optimizer</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!linkSugs && (
+                <Button onClick={fetchLinkSuggestions} disabled={linkBusy} size="sm" className="w-full" variant="outline">
+                  {linkBusy ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+                  Find best internal links
+                </Button>
+              )}
+              {linkSugs && linkSugs.length > 0 && (
+                <>
+                  <div className="space-y-2">
+                    {linkSugs.map((s, i) => (
+                      <div key={i} className="text-xs p-2 border rounded-md">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge variant="secondary">{(s.relevance * 100).toFixed(0)}%</Badge>
+                          <span className="font-medium truncate">{s.anchor}</span>
+                          <span className="text-muted-foreground">→</span>
+                          <a className="text-primary truncate" href={s.targetUrl} target="_blank" rel="noreferrer">{s.targetTitle}</a>
+                        </div>
+                        <div className="text-muted-foreground italic truncate">{s.contextSnippet}</div>
+                        <div className="text-muted-foreground">{s.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={fetchLinkSuggestions} disabled={linkBusy} size="sm" variant="outline">
+                      <RefreshCw className="size-4 mr-1" /> Refresh
+                    </Button>
+                    <Button onClick={applyLinks} disabled={linkBusy} size="sm" className="flex-1">
+                      {linkBusy ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+                      Apply {linkSugs.length} link(s) to live post
+                    </Button>
+                  </div>
+                </>
+              )}
+              {linkSugs && linkSugs.length === 0 && (
+                <p className="text-xs text-muted-foreground">No high-confidence link opportunities — content already well-linked or no topical matches.</p>
+              )}
+              {linkApplied && (
+                <div className="text-xs p-2 rounded-md bg-emerald-500/10 border">
+                  <div className="font-medium text-emerald-500">Inserted {linkApplied.applied} link(s)</div>
+                  {linkApplied.links.map((l, i) => (
+                    <div key={i} className="text-muted-foreground">→ {l.anchor}</div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {!fixes && (
             <Button onClick={() => generate(false)} disabled={busy} className="w-full">
               {busy ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
