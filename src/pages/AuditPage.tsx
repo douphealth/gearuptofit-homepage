@@ -294,7 +294,7 @@ function BulkCleanupPanel() {
       while (true) {
         const r = await callAudit<{ count: number; affected: LeakItem[]; done: boolean; totalPages: number }>(
           "wp-bulk-cleanup",
-          { mode: "scan", page, per_page: 1 },
+          { mode: "scan" },
         );
         all.push(...r.affected);
         setItems([...all]);
@@ -310,7 +310,7 @@ function BulkCleanupPanel() {
 
   const fixAll = async () => {
     if (!items || items.length === 0) return;
-    if (!confirm(`Re-save ${items.length} posts? This re-publishes each affected post via the WordPress REST API to bust render caches. The actual leak source is theme/Elementor custom CSS injected at render time — if the leak persists after re-save, the post needs to be opened in wp-admin and the broken Custom CSS block removed manually. The site stays live throughout.`)) return;
+      if (!confirm(`Disable ${items.length} leaking Elementor snippet(s)? This fixes the global source that prints CSS at the top of posts. It does not edit blog post content.`)) return;
     setFixing(true);
     try {
       const ids = items.map((i) => i.post_id);
@@ -335,16 +335,16 @@ function BulkCleanupPanel() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <CardTitle className="text-base">Site-wide CSS leak cleanup</CardTitle>
-            <p className="text-xs text-muted-foreground mt-1">Fetches each post's <strong>rendered apex page</strong> and detects raw <code>.gutf-article {`{...}`}</code> CSS appearing as visible text (outside <code>&lt;style&gt;</code>). The leak is injected by the theme/Elementor at render time — fix re-saves the post to bust caches; persistent leaks need a manual edit in wp-admin → Custom CSS.</p>
+            <p className="text-xs text-muted-foreground mt-1">Scans published Elementor snippets for raw <code>.gutf-article {`{...}`}</code> CSS that is missing a <code>&lt;style&gt;</code> wrapper, then drafts the offending global snippet. This fixes the source instead of re-saving posts.</p>
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={scan} disabled={scanning || fixing}>
               {scanning ? <Loader2 className="size-4 animate-spin mr-2" /> : <RefreshCw className="size-4 mr-2" />}
-              {scanning && status ? status : "Scan all posts"}
+              {scanning && status ? status : "Scan CSS snippets"}
             </Button>
             <Button size="sm" variant="destructive" onClick={fixAll} disabled={fixing || scanning || !items || items.length === 0}>
               {fixing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
-              {fixing && status ? status : `Fix ${items?.length ?? 0} posts`}
+              {fixing && status ? status : `Fix ${items?.length ?? 0} snippets`}
             </Button>
           </div>
         </div>
