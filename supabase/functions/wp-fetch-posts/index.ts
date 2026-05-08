@@ -4,35 +4,29 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
 const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
 const TTL_MIN = 15;
 
-function checkAuth(req: Request): boolean {
-  const pw = req.headers.get("x-audit-password");
-  return !!pw && pw === Deno.env.get("AUDIT_PASSWORD");
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (!checkAuth(req)) {
+  let body: any = {};
+  try { body = await req.json(); } catch { /* ignore */ }
+
+  const pw = body?._audit_password || req.headers.get("x-audit-password");
+  if (!pw || pw !== Deno.env.get("AUDIT_PASSWORD")) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
-  const url = new URL(req.url);
-  const force = url.searchParams.get("force") === "1";
+  const force = body?.force === true || body?.force === "1";
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  // Check freshness
   if (!force) {
     const { data: latest } = await supabase
-      .from("wp_posts_cache")
-      .select("fetched_at")
-      .order("fetched_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .from("wp_posts_cache").select("fetched_at")
+      .order("fetched_at", { ascending: false }).limit(1).maybeSingle();
     if (latest?.fetched_at) {
       const ageMin = (Date.now() - new Date(latest.fetched_at).getTime()) / 60000;
       if (ageMin < TTL_MIN) {
@@ -47,7 +41,6 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Fetch all posts paginated
   const all: any[] = [];
   let page = 1;
   while (true) {
@@ -66,10 +59,9 @@ Deno.serve(async (req) => {
     const totalPages = parseInt(r.headers.get("x-wp-totalpages") || "1", 10);
     if (page >= totalPages) break;
     page++;
-    if (page > 50) break; // safety
+    if (page > 50) break;
   }
 
-  // Upsert
   const rows = all.map((p) => ({
     post_id: p.id,
     slug: p.slug,
@@ -81,7 +73,6 @@ Deno.serve(async (req) => {
   }));
 
   if (rows.length > 0) {
-    // Chunked upsert
     for (let i = 0; i < rows.length; i += 50) {
       const chunk = rows.slice(i, i + 50);
       const { error } = await supabase.from("wp_posts_cache").upsert(chunk, { onConflict: "post_id" });
