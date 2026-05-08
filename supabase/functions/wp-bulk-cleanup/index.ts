@@ -132,56 +132,30 @@ Deno.serve(async (req) => {
 
   // ── SCAN ──────────────────────────────────────────────────────────────
   if (mode === "scan") {
-    const page = toInt(body.page, 1, 1, 10000);
-    const perPage = toInt(body.per_page, 1, 1, MAX_SCAN_PER_PAGE);
+    const authUser = Deno.env.get("WP_USERNAME");
+    const authPass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
+    const headers: Record<string, string> = { "User-Agent": "GearupAudit/1.0", "Accept": "application/json" };
+    if (authUser && authPass) headers.Authorization = "Basic " + btoa(`${authUser}:${authPass}`);
 
-    // 1) Get list of posts (id + link) for this page — tiny payload.
-    const listUrl = `${WP_BASE}/posts?per_page=${perPage}&page=${page}&status=publish&_fields=id,link,title`;
-    const listRes = await fetch(listUrl, { headers: { "User-Agent": "GearupAudit/1.0" } });
-    if (listRes.status === 400) {
-      await listRes.text();
-      return jsonRes({ mode, page, per_page: perPage, count: 0, affected: [], totalPages: 0, done: true });
-    }
-    if (!listRes.ok) {
-      await listRes.text();
-      return jsonRes({ error: `WP REST list page ${page} failed: ${listRes.status}` }, 502);
-    }
-    const totalPages = Number(listRes.headers.get("x-wp-totalpages") || 0);
-    const items: Array<{ id: number; link: string; title: { rendered: string } }> = await listRes.json();
-
-    const affected: Array<{ post_id: number; link: string; title: string; sample: string }> = [];
-
-    // 2) For each post, fetch the rendered apex HTML and look for leaks
-    //    OUTSIDE <style>/<script>.
-    for (const item of items) {
-      const link = String(item.link || "");
-      if (!link) continue;
-      try {
-        const pageRes = await fetch(link, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 GearupAudit/1.0",
-            "Accept": "text/html",
-          },
-          redirect: "follow",
-        });
-        if (!pageRes.ok) { await pageRes.text(); continue; }
-        const html = await pageRes.text();
-        const { found, sample } = htmlHasLeak(html);
-        if (found) {
-          affected.push({
-            post_id: Number(item.id),
-            link,
-            title: stripTags(String(item.title?.rendered || "Untitled")),
-            sample: sample || "",
-          });
-        }
-      } catch {
-        // skip on individual page failure
-      }
+    const res = await fetch(`${WP_BASE}/elementor_snippet?per_page=100&status=publish&context=edit&_fields=id,slug,status,title,meta`, { headers });
+    if (!res.ok) {
+      const text = await res.text();
+      return jsonRes({ error: `Elementor snippet scan failed: ${res.status} ${text.slice(0, 160)}` }, 502);
     }
 
-    const done = totalPages > 0 ? page >= totalPages : false;
-    return jsonRes({ mode, page, per_page: perPage, totalPages, count: affected.length, affected, done });
+    const snippets: Snippet[] = await res.json();
+    const affected = snippets.flatMap((item) => {
+      const leak = snippetHasLeak(item);
+      if (!leak.found) return [];
+      return [{
+        post_id: Number(item.id),
+        link: `${APEX}/wp-admin/post.php?post=${Number(item.id)}&action=edit`,
+        title: snippetTitle(item),
+        sample: `${leak.reason}: ${leak.sample || ""}`,
+      }];
+    });
+
+    return jsonRes({ mode, page: 1, per_page: snippets.length, totalPages: 1, count: affected.length, affected, done: true });
   }
 
   // ── FIX ──────────────────────────────────────────────────────────────
