@@ -19,9 +19,9 @@ Deno.serve(async (req) => {
   }
 
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-  const { post_id, payload } = await req.json();
-  if (!post_id || !payload) {
-    return new Response(JSON.stringify({ error: "post_id and payload required" }), {
+  const { post_id, fixes } = await req.json();
+  if (!post_id || !fixes) {
+    return new Response(JSON.stringify({ error: "post_id and fixes required" }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
@@ -35,14 +35,22 @@ Deno.serve(async (req) => {
   }
   const auth = "Basic " + btoa(`${user}:${pass.replace(/\s+/g, "")}`);
 
-  // SAFETY: hardcode draft. Allow only safe fields.
+  // Fetch original content from cache
+  const { data: cached } = await supabase.from("wp_posts_cache").select("data").eq("post_id", post_id).maybeSingle();
+  const original = (cached?.data as any)?.content?.rendered || "";
+
+  const faqHtml = (fixes.faq || []).map((f: any) => `<h3>${f.q}</h3><p>${f.a}</p>`).join("\n");
+  const jsonLd = fixes.jsonLd ? `<script type="application/ld+json">${JSON.stringify(fixes.jsonLd)}</script>` : "";
+  const intro = fixes.introParagraph ? `<p><strong>${fixes.introParagraph}</strong></p>` : "";
+  const newContent = `${intro}\n${original}\n<h2>Frequently Asked Questions</h2>\n${faqHtml}\n${jsonLd}`;
+
+  // SAFETY: hardcoded status=draft.
   const safeBody: Record<string, unknown> = {
     status: "draft",
+    content: newContent,
   };
-  if (typeof payload.title === "string") safeBody.title = payload.title;
-  if (typeof payload.content === "string") safeBody.content = payload.content;
-  if (typeof payload.excerpt === "string") safeBody.excerpt = payload.excerpt;
-  if (payload.meta && typeof payload.meta === "object") safeBody.meta = payload.meta;
+  if (typeof fixes.metaTitle === "string") safeBody.title = fixes.metaTitle;
+  if (typeof fixes.metaDescription === "string") safeBody.excerpt = fixes.metaDescription;
 
   const r = await fetch(`${WP_BASE}/posts/${post_id}`, {
     method: "POST",

@@ -12,7 +12,7 @@ import {
 
 type Issue = { severity: "critical" | "high" | "polish"; code: string; message: string };
 type ScoreRow = { post_id: number; score: number; issues: Issue[]; metrics: any; scanned_at: string };
-type Post = { post_id: number; slug: string; title: string; link: string; modified_at: string; data: any };
+type Post = { post_id: number; slug: string; title: string; link: string; modified_at: string };
 
 function sevColor(s: Issue["severity"]) {
   return s === "critical" ? "destructive" : s === "high" ? "default" : "secondary";
@@ -221,19 +221,9 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
     if (!confirm("Push these changes as a DRAFT to WordPress? Your live post will NOT change until you publish in wp-admin.")) return;
     setPushing(true);
     try {
-      // Build payload: prepend FAQ as HTML + JSON-LD script
-      const faqHtml = (fixes.faq || []).map((f: any) => `<h3>${f.q}</h3><p>${f.a}</p>`).join("\n");
-      const jsonLd = fixes.jsonLd ? `<script type="application/ld+json">${JSON.stringify(fixes.jsonLd)}</script>` : "";
-      const intro = fixes.introParagraph ? `<p><strong>${fixes.introParagraph}</strong></p>` : "";
-      const original = post.data?.content?.rendered || "";
-      const newContent = `${intro}\n${original}\n<h2>Frequently Asked Questions</h2>\n${faqHtml}\n${jsonLd}`;
       const r = await callAudit<{ draft_url: string; message: string }>("wp-push-draft", {
         post_id: post.post_id,
-        payload: {
-          title: fixes.metaTitle || undefined,
-          content: newContent,
-          excerpt: fixes.metaDescription || undefined,
-        },
+        fixes,
       });
       toast({ title: "Draft pushed", description: r.message });
       if (r.draft_url) window.open(r.draft_url, "_blank");
