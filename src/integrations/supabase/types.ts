@@ -111,6 +111,7 @@ export type Database = {
           imported_count: number
           page: number
           post_ids: number[]
+          post_refs: Json
           retry_count: number
           run_id: string
           status: string
@@ -122,6 +123,7 @@ export type Database = {
           imported_count?: number
           page: number
           post_ids?: number[]
+          post_refs?: Json
           retry_count?: number
           run_id: string
           status?: string
@@ -133,6 +135,7 @@ export type Database = {
           imported_count?: number
           page?: number
           post_ids?: number[]
+          post_refs?: Json
           retry_count?: number
           run_id?: string
           status?: string
