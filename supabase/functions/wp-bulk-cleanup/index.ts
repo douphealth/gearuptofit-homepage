@@ -69,11 +69,7 @@ function snippetTitle(item: Snippet): string {
 }
 
 function snippetHasLeak(item: Snippet): { found: boolean; sample?: string; reason?: string } {
-  const title = snippetTitle(item);
   const code = String(item.meta?._elementor_code || "");
-  if (/post layout fix/i.test(title) && LEAK_ANCHORS.some((a) => code.includes(a.replace(" ", "")) || code.includes(a))) {
-    return { found: true, reason: "duplicated global Elementor CSS snippet", sample: code.slice(0, 180).replace(/\s+/g, " ") };
-  }
   if (codeHasRawCssLeak(code)) {
     return { found: true, reason: "raw CSS missing <style> wrapper", sample: code.slice(0, 180).replace(/\s+/g, " ") };
   }
