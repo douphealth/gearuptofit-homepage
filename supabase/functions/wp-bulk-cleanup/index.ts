@@ -314,5 +314,119 @@ Deno.serve(async (req) => {
     }
   }
 
+  // ── SCAN_URL ────────────────────────────────────────────────────────────
+  // Targeted scan for a single URL/slug.
+  if (mode === "scan_url") {
+    const url = String(body.url || "").trim();
+    if (!url) return jsonRes({ error: "url required" }, 400);
+    let slug = "";
+    try {
+      const u = new URL(url);
+      const parts = u.pathname.split("/").filter(Boolean);
+      slug = parts[parts.length - 1] || "";
+    } catch {
+      return jsonRes({ error: "Invalid URL" }, 400);
+    }
+    if (!slug) return jsonRes({ error: "Could not parse slug from URL" }, 400);
+    const restUrl = `${WP_BASE}/posts?slug=${encodeURIComponent(slug)}&status=publish&_fields=id,slug,link,title,content`;
+    const res = await fetch(restUrl, { headers: { "User-Agent": "GearupAudit/2.0", Accept: "application/json" } });
+    if (!res.ok) return jsonRes({ error: `WP lookup failed: ${res.status}` }, 502);
+    const posts: Post[] = await res.json();
+    if (!posts.length) return jsonRes({ error: `No published post found for slug "${slug}"` }, 404);
+    const affected = posts.flatMap((p) => {
+      const html = p.content?.rendered || "";
+      const leak = renderedHasLeak(html);
+      return [{
+        post_id: Number(p.id),
+        link: p.link || url,
+        title: plainTitle(p),
+        sample: leak.sample,
+        found: leak.found,
+      }];
+    });
+    return jsonRes({ mode, count: affected.filter((a) => a.found).length, affected });
+  }
+
+  // ── VERIFY ──────────────────────────────────────────────────────────────
+  // Cache-busting verification. Fetches the live URL with a cache-buster query
+  // AND the WordPress REST API rendered content, then checks both for the
+  // leak signatures. Lets the user see if they're staring at a stale browser
+  // cache vs. an actual unfixed leak.
+  if (mode === "verify") {
+    const url = String(body.url || "").trim();
+    if (!url) return jsonRes({ error: "url required" }, 400);
+    let slug = "";
+    try {
+      const u = new URL(url);
+      const parts = u.pathname.split("/").filter(Boolean);
+      slug = parts[parts.length - 1] || "";
+    } catch {
+      return jsonRes({ error: "Invalid URL" }, 400);
+    }
+    const cacheBuster = `_cb=${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const liveUrl = url + (url.includes("?") ? "&" : "?") + cacheBuster;
+    const headers = {
+      "User-Agent": "GearupAudit/2.0 (cache-bust verify)",
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      Accept: "text/html,application/xhtml+xml",
+    };
+
+    let liveStatus = 0;
+    let liveLeak: { found: boolean; sample?: string } = { found: false };
+    let liveCacheHeaders: Record<string, string> = {};
+    let liveBytes = 0;
+    try {
+      const lr = await fetch(liveUrl, { headers, redirect: "follow" });
+      liveStatus = lr.status;
+      ["age", "x-cache", "cf-cache-status", "cache-control", "x-served-by", "last-modified"].forEach((h) => {
+        const v = lr.headers.get(h);
+        if (v) liveCacheHeaders[h] = v;
+      });
+      const html = await lr.text();
+      liveBytes = html.length;
+      liveLeak = renderedHasLeak(html);
+    } catch (e) {
+      return jsonRes({ error: `Live fetch failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
+    }
+
+    let restLeak: { found: boolean; sample?: string } = { found: false };
+    let postId: number | null = null;
+    if (slug) {
+      try {
+        const rr = await fetch(
+          `${WP_BASE}/posts?slug=${encodeURIComponent(slug)}&status=publish&_fields=id,content`,
+          { headers: { "User-Agent": "GearupAudit/2.0", Accept: "application/json" } },
+        );
+        if (rr.ok) {
+          const arr: Post[] = await rr.json();
+          if (arr[0]) {
+            postId = Number(arr[0].id);
+            restLeak = renderedHasLeak(arr[0].content?.rendered || "");
+          }
+        }
+      } catch { /* best effort */ }
+    }
+
+    // Verdict matrix:
+    //   live=true, rest=true  → real unfixed leak
+    //   live=true, rest=false → CDN/browser cache stale (the fix worked, cache hasn't rolled over)
+    //   live=false, rest=true → origin still leaks but live HTML doesn't (rare)
+    //   live=false, rest=false → fully clean
+    let verdict: "clean" | "stale_cache" | "real_leak" | "origin_only" = "clean";
+    if (liveLeak.found && restLeak.found) verdict = "real_leak";
+    else if (liveLeak.found && !restLeak.found) verdict = "stale_cache";
+    else if (!liveLeak.found && restLeak.found) verdict = "origin_only";
+
+    return jsonRes({
+      mode, verdict,
+      liveUrl, liveStatus, liveBytes,
+      live: liveLeak,
+      rest: restLeak,
+      post_id: postId,
+      cacheHeaders: liveCacheHeaders,
+    });
+  }
+
   return jsonRes({ error: "Unknown mode" }, 400);
 });
