@@ -14,7 +14,126 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      ai_fixes_cache: {
+        Row: {
+          fixes: Json
+          generated_at: string
+          post_id: number
+        }
+        Insert: {
+          fixes: Json
+          generated_at?: string
+          post_id: number
+        }
+        Update: {
+          fixes?: Json
+          generated_at?: string
+          post_id?: number
+        }
+        Relationships: []
+      }
+      audit_history: {
+        Row: {
+          id: number
+          post_id: number
+          scanned_at: string
+          score: number
+        }
+        Insert: {
+          id?: number
+          post_id: number
+          scanned_at?: string
+          score: number
+        }
+        Update: {
+          id?: number
+          post_id?: number
+          scanned_at?: string
+          score?: number
+        }
+        Relationships: []
+      }
+      audit_scores: {
+        Row: {
+          issues: Json
+          metrics: Json
+          post_id: number
+          scanned_at: string
+          score: number
+        }
+        Insert: {
+          issues?: Json
+          metrics?: Json
+          post_id: number
+          scanned_at?: string
+          score: number
+        }
+        Update: {
+          issues?: Json
+          metrics?: Json
+          post_id?: number
+          scanned_at?: string
+          score?: number
+        }
+        Relationships: []
+      }
+      push_log: {
+        Row: {
+          created_at: string
+          draft_url: string | null
+          id: number
+          message: string | null
+          post_id: number
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          draft_url?: string | null
+          id?: number
+          message?: string | null
+          post_id: number
+          status: string
+        }
+        Update: {
+          created_at?: string
+          draft_url?: string | null
+          id?: number
+          message?: string | null
+          post_id?: number
+          status?: string
+        }
+        Relationships: []
+      }
+      wp_posts_cache: {
+        Row: {
+          data: Json
+          fetched_at: string
+          link: string | null
+          modified_at: string | null
+          post_id: number
+          slug: string | null
+          title: string | null
+        }
+        Insert: {
+          data: Json
+          fetched_at?: string
+          link?: string | null
+          modified_at?: string | null
+          post_id: number
+          slug?: string | null
+          title?: string | null
+        }
+        Update: {
+          data?: Json
+          fetched_at?: string
+          link?: string | null
+          modified_at?: string | null
+          post_id?: number
+          slug?: string | null
+          title?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
