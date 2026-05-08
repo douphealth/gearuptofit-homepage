@@ -104,6 +104,92 @@ export type Database = {
         }
         Relationships: []
       }
+      wp_import_pages: {
+        Row: {
+          error: string | null
+          fetched_at: string | null
+          imported_count: number
+          page: number
+          post_ids: number[]
+          retry_count: number
+          run_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          error?: string | null
+          fetched_at?: string | null
+          imported_count?: number
+          page: number
+          post_ids?: number[]
+          retry_count?: number
+          run_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          error?: string | null
+          fetched_at?: string | null
+          imported_count?: number
+          page?: number
+          post_ids?: number[]
+          retry_count?: number
+          run_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wp_import_pages_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "wp_import_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wp_import_runs: {
+        Row: {
+          completed_at: string | null
+          error: string | null
+          expected_pages: number
+          expected_total: number
+          first_missing_page: number | null
+          id: string
+          imported_total: number
+          per_page: number
+          started_at: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          error?: string | null
+          expected_pages?: number
+          expected_total?: number
+          first_missing_page?: number | null
+          id?: string
+          imported_total?: number
+          per_page?: number
+          started_at?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          error?: string | null
+          expected_pages?: number
+          expected_total?: number
+          first_missing_page?: number | null
+          id?: string
+          imported_total?: number
+          per_page?: number
+          started_at?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       wp_posts_cache: {
         Row: {
           data: Json
