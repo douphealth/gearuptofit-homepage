@@ -276,7 +276,7 @@ function Stat({ label, value, className = "" }: { label: string; value: number |
   );
 }
 
-type LeakItem = { post_id: number; link: string; title: string; preview: string };
+type LeakItem = { post_id: number; link: string; title: string };
 type FixResult = { post_id: number; ok: boolean; removed_chars?: number; error?: string };
 
 function BulkCleanupPanel() {
@@ -286,11 +286,22 @@ function BulkCleanupPanel() {
   const [results, setResults] = useState<FixResult[] | null>(null);
 
   const scan = async () => {
-    setScanning(true); setResults(null);
+    setScanning(true); setResults(null); setItems([]);
     try {
-      const r = await callAudit<{ count: number; affected: LeakItem[] }>("wp-bulk-cleanup", { mode: "scan" });
-      setItems(r.affected);
-      toast({ title: `Scan complete`, description: `${r.count} posts contain leaked CSS.` });
+      const all: LeakItem[] = [];
+      let page = 1;
+      while (true) {
+        const r = await callAudit<{ count: number; affected: LeakItem[]; done: boolean; totalPages: number }>(
+          "wp-bulk-cleanup",
+          { mode: "scan", page, per_page: 25 },
+        );
+        all.push(...r.affected);
+        setItems([...all]);
+        if (r.done) break;
+        page++;
+        if (page > 200) break;
+      }
+      toast({ title: `Scan complete`, description: `${all.length} posts contain leaked CSS.` });
     } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
     setScanning(false);
   };
