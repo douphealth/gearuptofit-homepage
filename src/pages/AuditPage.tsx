@@ -647,8 +647,11 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
   const [busy, setBusy] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [overhaulResult, setOverhaulResult] = useState<{ changes: string[]; message: string } | null>(null);
+  const [linkSugs, setLinkSugs] = useState<any[] | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkApplied, setLinkApplied] = useState<{ applied: number; links: any[] } | null>(null);
 
-  useEffect(() => { setFixes(null); setOverhaulResult(null); }, [post?.post_id]);
+  useEffect(() => { setFixes(null); setOverhaulResult(null); setLinkSugs(null); setLinkApplied(null); }, [post?.post_id]);
 
   if (!post) return null;
 
@@ -694,6 +697,32 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
     } catch (e: any) { toast({ title: "Revert failed", description: e.message, variant: "destructive" }); }
     setPushing(false);
   };
+
+  const fetchLinkSuggestions = async () => {
+    setLinkBusy(true);
+    try {
+      const r = await callAudit<{ suggestions: any[] }>("audit-link-optimizer", { mode: "suggest", post_id: post.post_id, max: 8 });
+      setLinkSugs(r.suggestions || []);
+      if (!r.suggestions?.length) toast({ title: "No link opportunities found" });
+    } catch (e: any) { toast({ title: "Link optimizer failed", description: e.message, variant: "destructive" }); }
+    setLinkBusy(false);
+  };
+
+  const applyLinks = async () => {
+    if (!linkSugs?.length) return;
+    if (!confirm(`Insert ${linkSugs.length} internal link(s) directly into LIVE post ${post.post_id}? Idempotent — re-running won't duplicate.`)) return;
+    setLinkBusy(true);
+    try {
+      const r = await callAudit<{ applied: number; links: any[] }>("audit-link-optimizer", {
+        mode: "apply", post_id: post.post_id, suggestions: linkSugs, max: linkSugs.length,
+      });
+      setLinkApplied({ applied: r.applied, links: r.links });
+      toast({ title: `Inserted ${r.applied} link(s)`, description: r.links.map((l: any) => l.anchor).join(", ") });
+    } catch (e: any) { toast({ title: "Apply failed", description: e.message, variant: "destructive" }); }
+    setLinkBusy(false);
+  };
+
+  const cwv = (score?.metrics as any)?.cwv;
 
   return (
     <Sheet open={!!post} onOpenChange={(o) => !o && onClose()}>
