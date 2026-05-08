@@ -1,43 +1,52 @@
-// Site-wide cleanup of leaked WordPress CSS.
+// Site-wide cleanup of leaked WordPress CSS that renders as visible text.
 //
-// Root cause: the visible `.gutf-article { ... }` text was created by globally
-// published Elementor snippets. One duplicate snippet injected the CSS without
-// a <style> wrapper, so every apex-domain post rendered the rules as text. Post
-// re-saves cannot fix this because the bad source is global snippet metadata,
-// not individual post content.
+// Root cause (verified on origin.gearuptofit.com REST API):
+//   Authors pasted a large CSS block into post content as HTML. The first
+//   <style>…</style> closes early (sidebar-hide CSS), and the remaining CSS
+//   declarations sit OUTSIDE any <style> tag. WordPress's wpautop then wraps
+//   the orphan CSS in <p>…</p> tags, so the browser renders the rules as
+//   visible text at the top of the post (".gutf-article { … !important … }").
 //
-// This function now scans/fixes the source: published Elementor snippets whose
-// code is raw article-layout CSS or the duplicated "Post Layout Fix" snippets.
-// It avoids full-site HTML crawling to stay below worker memory limits.
+// SOTA fix: surgically re-wrap the orphan CSS region in a single <style> tag
+// inside the raw post content, then PUT it back via the REST API. This keeps
+// the author's design system intact and never touches valid prose.
+//
+// Memory-safe: 1 page (≤100 posts) per scan call, 1 post per fix call.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 const WP_BASE = "https://origin.gearuptofit.com/wp-json/wp/v2";
 const APEX = "https://gearuptofit.com";
-const MAX_FIX_PER_CALL = 1;
 
-const LEAK_ANCHORS = [
-  ".gutf-article {",
-  ".gutf-article{",
-  ".product-box-inner {",
-  ".product-box-inner{",
+// CSS signatures that indicate orphan rules visible in body text.
+const VISIBLE_LEAK_PATTERNS: RegExp[] = [
+  /\.gutf-article\s*\{[^}]*!important/i,
+  /\.product-box-(?:img|inner|content|specs)\s*\{[^}]*!important/i,
+  /\.elementor-widget-theme-post-content\s*\{[^}]*max-width\s*:\s*\d+px\s*!important/i,
+  /\.gutf-callout\s*\{/i,
+  /\.gutf-toc\s*\{/i,
 ];
 
-type Snippet = {
+type Post = {
   id: number;
   slug?: string;
-  status?: string;
-  title?: { raw?: string; rendered?: string };
-  meta?: Record<string, unknown>;
+  link?: string;
+  title?: { rendered?: string; raw?: string };
+  content?: { rendered?: string; raw?: string };
 };
 
-function toInt(v: unknown, def: number, min: number, max: number): number {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return def;
-  return Math.max(min, Math.min(max, Math.trunc(n)));
+function jsonRes(p: unknown, status = 200) {
+  return new Response(JSON.stringify(p), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+async function readBody(req: Request) {
+  try { return await req.json() as Record<string, unknown>; } catch { return {}; }
 }
 
 function decodeEntities(v: string): string {
@@ -47,55 +56,136 @@ function decodeEntities(v: string): string {
     .replace(/&quot;/g, '"').replace(/&#039;/g, "'")
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
-function stripTags(v: string): string {
-  return decodeEntities(v.replace(/<[^>]+>/g, "").trim());
+function plainTitle(p: Post): string {
+  const raw = p.title?.raw || p.title?.rendered || `Post ${p.id}`;
+  return decodeEntities(raw.replace(/<[^>]+>/g, "").trim());
 }
 
-function stripStyleAndScript(html: string): string {
-  return html
+// Strip <style>/<script>/<!-- --> regions, then test for visible leak markers.
+function renderedHasLeak(html: string): { found: boolean; sample?: string } {
+  const stripped = html
     .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[\s\S]*?<\/script>/gi, "");
-}
-
-function codeHasRawCssLeak(code: string): boolean {
-  const trimmed = code.trim();
-  if (!trimmed) return false;
-  if (/^<style\b[\s\S]*<\/style>\s*$/i.test(trimmed)) return false;
-  return LEAK_ANCHORS.some((a) => trimmed.includes(a));
-}
-
-function snippetTitle(item: Snippet): string {
-  return stripTags(String(item.title?.raw || item.title?.rendered || "Untitled snippet"));
-}
-
-function snippetHasLeak(item: Snippet): { found: boolean; sample?: string; reason?: string } {
-  const code = String(item.meta?._elementor_code || "");
-  if (codeHasRawCssLeak(code)) {
-    return { found: true, reason: "raw CSS missing <style> wrapper", sample: code.slice(0, 180).replace(/\s+/g, " ") };
-  }
-  return { found: false };
-}
-
-function htmlHasLeak(html: string): { found: boolean; sample?: string } {
-  const withoutStyles = stripStyleAndScript(html);
-  const stripped = withoutStyles.replace(/<!--[\s\S]*?-->/g, "");
-  for (const a of LEAK_ANCHORS) {
-    const i = stripped.indexOf(a);
-    if (i !== -1) {
-      return { found: true, sample: stripped.slice(i, i + 160).replace(/\s+/g, " ") };
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "");
+  for (const re of VISIBLE_LEAK_PATTERNS) {
+    const m = re.exec(stripped);
+    if (m) {
+      const i = Math.max(0, m.index - 30);
+      return { found: true, sample: stripped.slice(i, i + 200).replace(/\s+/g, " ") };
     }
   }
   return { found: false };
 }
 
-async function readBody(req: Request): Promise<Record<string, unknown>> {
-  try { return await req.json(); } catch { return {}; }
-}
-function jsonRes(p: unknown, status = 200) {
-  return new Response(JSON.stringify(p), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+// Detect "this looks like CSS, not prose": at least one selector { … } pair.
+const CSS_SIGNATURE = /[.@#a-zA-Z][^<>{}\n]{0,160}\{[^<>}]{2,}\}/;
+
+/**
+ * Walk the raw post HTML and re-wrap every orphan CSS region in <style>…</style>.
+ *
+ * Strategy:
+ *   1. Find all `<style …>…</style>` and `<script …>…</script>` regions and treat
+ *      them as protected.
+ *   2. Look at every gap *between* HTML tags that lives OUTSIDE a protected region.
+ *      If the gap contains a CSS rule signature (`selector { … }`) we mark it as
+ *      orphan CSS.
+ *   3. Merge consecutive orphan gaps (with their separating tags, like the `</p>
+ *      <p>` injected by wpautop) into a single contiguous orphan block.
+ *   4. Replace each merged block with `<style>cleaned-css</style>` where the
+ *      cleaned CSS strips wrapper tags (`</p>`, `<p>`, `<br />`) but keeps the
+ *      original CSS text.
+ *
+ * This is conservative: blocks that are pure prose are never touched because
+ * they don't match the CSS rule signature.
+ */
+function rewrapOrphanCss(raw: string): { html: string; removed: number } {
+  // Find protected regions (start, end) for <style> and <script>.
+  const protectedRanges: Array<[number, number]> = [];
+  const reProt = /<(style|script)\b[^>]*>[\s\S]*?<\/\1>/gi;
+  let pm: RegExpExecArray | null;
+  while ((pm = reProt.exec(raw))) protectedRanges.push([pm.index, pm.index + pm[0].length]);
+  const inProtected = (i: number) => protectedRanges.some(([a, b]) => i >= a && i < b);
+
+  // Tokenize into an array of segments: { kind: 'tag' | 'text', start, end }.
+  type Seg = { kind: "tag" | "text"; start: number; end: number };
+  const segs: Seg[] = [];
+  let cursor = 0;
+  const reTag = /<[^>]+>/g;
+  let tm: RegExpExecArray | null;
+  while ((tm = reTag.exec(raw))) {
+    if (tm.index > cursor) segs.push({ kind: "text", start: cursor, end: tm.index });
+    segs.push({ kind: "tag", start: tm.index, end: tm.index + tm[0].length });
+    cursor = tm.index + tm[0].length;
+  }
+  if (cursor < raw.length) segs.push({ kind: "text", start: cursor, end: raw.length });
+
+  // Find orphan CSS text segments (outside protected ranges, contain CSS signature).
+  const orphanText = segs.map((s) => {
+    if (s.kind !== "text") return false;
+    if (inProtected(s.start)) return false;
+    const txt = raw.slice(s.start, s.end);
+    return CSS_SIGNATURE.test(txt);
   });
+
+  if (!orphanText.some(Boolean)) return { html: raw, removed: 0 };
+
+  // Group contiguous orphan runs. Tags that appear *between* two orphan text
+  // segments (e.g. `</p><p>` injected by wpautop) are absorbed into the run.
+  type Run = { firstSeg: number; lastSeg: number };
+  const runs: Run[] = [];
+  let i = 0;
+  while (i < segs.length) {
+    if (!orphanText[i]) { i++; continue; }
+    let j = i;
+    let k = i + 1;
+    // Extend through tags + further orphan text.
+    while (k < segs.length) {
+      if (orphanText[k]) { j = k; k++; continue; }
+      if (segs[k].kind === "tag" && !inProtected(segs[k].start)) {
+        // Look ahead: is there more orphan text shortly?
+        let look = k + 1;
+        let foundMore = false;
+        // Allow up to 3 intervening tags (e.g. </p><p> with whitespace text gap is rare here)
+        while (look < segs.length && look <= k + 3) {
+          if (orphanText[look]) { foundMore = true; break; }
+          if (segs[look].kind === "text") {
+            const t = raw.slice(segs[look].start, segs[look].end).trim();
+            if (t.length > 0 && !CSS_SIGNATURE.test(raw.slice(segs[look].start, segs[look].end))) break;
+          }
+          look++;
+        }
+        if (foundMore) { k++; continue; }
+      }
+      break;
+    }
+    runs.push({ firstSeg: i, lastSeg: j });
+    i = j + 1;
+  }
+
+  if (!runs.length) return { html: raw, removed: 0 };
+
+  // Build new HTML by replacing each run with a single <style> block.
+  let out = "";
+  let lastEnd = 0;
+  let removedTotal = 0;
+  for (const run of runs) {
+    const runStart = segs[run.firstSeg].start;
+    const runEnd = segs[run.lastSeg].end;
+    out += raw.slice(lastEnd, runStart);
+    const slice = raw.slice(runStart, runEnd);
+    // Strip wpautop wrappers and stray markup from inside the orphan CSS.
+    const cleaned = slice
+      .replace(/<\/?p\b[^>]*>/gi, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/?span\b[^>]*>/gi, "")
+      .replace(/&nbsp;/g, " ")
+      .trim();
+    out += `<style>${cleaned}</style>`;
+    removedTotal += slice.length - cleaned.length;
+    lastEnd = runEnd;
+  }
+  out += raw.slice(lastEnd);
+  return { html: out, removed: removedTotal };
 }
 
 async function logEvent(postId: number, message: string) {
@@ -114,7 +204,7 @@ async function logEvent(postId: number, message: string) {
         draft_url: `${APEX}/wp-admin/post.php?post=${postId}&action=edit`,
       }),
     }).then((r) => r.text());
-  } catch { /* never fail on logging */ }
+  } catch { /* logging is best-effort */ }
 }
 
 Deno.serve(async (req) => {
@@ -126,84 +216,102 @@ Deno.serve(async (req) => {
 
   const mode = String(body.mode || "scan");
 
-  // ── SCAN ──────────────────────────────────────────────────────────────
+  // ── SCAN ────────────────────────────────────────────────────────────────
+  // Scans 1 REST page (up to 100 posts) of public posts per call.
   if (mode === "scan") {
-    const authUser = Deno.env.get("WP_USERNAME");
-    const authPass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
-    const headers: Record<string, string> = { "User-Agent": "GearupAudit/1.0", "Accept": "application/json" };
-    if (authUser && authPass) headers.Authorization = "Basic " + btoa(`${authUser}:${authPass}`);
-
-    const res = await fetch(`${WP_BASE}/elementor_snippet?per_page=100&status=publish&context=edit&_fields=id,slug,status,title,meta`, { headers });
-    if (!res.ok) {
-      const text = await res.text();
-      return jsonRes({ error: `Elementor snippet scan failed: ${res.status} ${text.slice(0, 160)}` }, 502);
+    const page = Math.max(1, Math.min(50, Number(body.page) || 1));
+    const url = `${WP_BASE}/posts?per_page=100&page=${page}&status=publish&_fields=id,slug,link,title,content`;
+    const res = await fetch(url, { headers: { "User-Agent": "GearupAudit/2.0", Accept: "application/json" } });
+    if (res.status === 400 && page > 1) {
+      return jsonRes({ mode, page, totalPages: page - 1, count: 0, affected: [], done: true });
     }
-
-    const snippets: Snippet[] = await res.json();
-    const affected = snippets.flatMap((item) => {
-      const leak = snippetHasLeak(item);
+    if (!res.ok) {
+      const txt = await res.text();
+      return jsonRes({ error: `Posts scan failed: ${res.status} ${txt.slice(0, 160)}` }, 502);
+    }
+    const totalPages = Number(res.headers.get("x-wp-totalpages") || page);
+    const posts: Post[] = await res.json();
+    const affected = posts.flatMap((p) => {
+      const html = p.content?.rendered || "";
+      if (!html) return [];
+      const leak = renderedHasLeak(html);
       if (!leak.found) return [];
       return [{
-        post_id: Number(item.id),
-        link: `${APEX}/wp-admin/post.php?post=${Number(item.id)}&action=edit`,
-        title: snippetTitle(item),
-        sample: `${leak.reason}: ${leak.sample || ""}`,
+        post_id: Number(p.id),
+        link: p.link || `${APEX}/?p=${p.id}`,
+        title: plainTitle(p),
+        sample: leak.sample,
       }];
     });
-
-    return jsonRes({ mode, page: 1, per_page: snippets.length, totalPages: 1, count: affected.length, affected, done: true });
+    const done = page >= totalPages || posts.length < 100;
+    return jsonRes({ mode, page, totalPages, count: affected.length, affected, done });
   }
 
-  // ── FIX ──────────────────────────────────────────────────────────────
-  // Fix the actual global source by drafting the offending Elementor snippets.
+  // ── FIX ─────────────────────────────────────────────────────────────────
+  // Surgically re-wraps orphan CSS in 1 post per call.
   if (mode === "fix") {
     const user = Deno.env.get("WP_USERNAME");
     const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
     if (!user || !pass) return jsonRes({ error: "WP credentials not configured" }, 500);
 
     const ids = Array.isArray(body.post_ids) ? body.post_ids.map(Number).filter(Boolean) : [];
-    const limited = ids.slice(0, MAX_FIX_PER_CALL);
-    if (!limited.length) return jsonRes({ error: "post_ids required" }, 400);
+    if (!ids.length) return jsonRes({ error: "post_ids required" }, 400);
+    const id = ids[0]; // 1 per call to stay under worker memory.
 
     const auth = "Basic " + btoa(`${user}:${pass}`);
-    const results: Array<{ post_id: number; ok: boolean; removed_chars?: number; error?: string }> = [];
-
-    for (const id of limited) {
-      try {
-        const getRes = await fetch(`${WP_BASE}/elementor_snippet/${id}?context=edit&_fields=id,title,meta,status`, {
-          headers: { Authorization: auth, "User-Agent": "GearupAudit/1.0" },
+    try {
+      const getRes = await fetch(`${WP_BASE}/posts/${id}?context=edit&_fields=id,title,content`, {
+        headers: { Authorization: auth, "User-Agent": "GearupAudit/2.0" },
+      });
+      if (!getRes.ok) {
+        const t = await getRes.text();
+        return jsonRes({
+          mode, attempted: 1, fixed: 0,
+          results: [{ post_id: id, ok: false, error: `GET ${getRes.status}: ${t.slice(0, 120)}` }],
         });
-        if (!getRes.ok) {
-          await getRes.text();
-          results.push({ post_id: id, ok: false, error: `GET snippet ${getRes.status}` });
-          continue;
-        }
-        const snippet: Snippet = await getRes.json();
-        const leak = snippetHasLeak(snippet);
-        if (!leak.found) {
-          results.push({ post_id: id, ok: true, removed_chars: 0 });
-          continue;
-        }
-        const removed = String(snippet.meta?._elementor_code || "").length;
-        const updateRes = await fetch(`${WP_BASE}/elementor_snippet/${id}`, {
-          method: "POST",
-          headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/1.0" },
-          body: JSON.stringify({ status: "draft" }),
-        });
-        if (!updateRes.ok) {
-          const t = await updateRes.text();
-          results.push({ post_id: id, ok: false, error: `Draft snippet failed ${updateRes.status}: ${t.slice(0, 160)}` });
-          continue;
-        }
-        await updateRes.text();
-        results.push({ post_id: id, ok: true, removed_chars: removed });
-        await logEvent(id, `Drafted leaking Elementor snippet: ${snippetTitle(snippet)}`);
-      } catch (e) {
-        results.push({ post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) });
       }
+      const post: Post = await getRes.json();
+      const raw = post.content?.raw || "";
+      if (!raw) {
+        return jsonRes({
+          mode, attempted: 1, fixed: 0,
+          results: [{ post_id: id, ok: false, error: "Post has no editable raw content" }],
+        });
+      }
+      const { html: cleaned, removed } = rewrapOrphanCss(raw);
+      if (cleaned === raw) {
+        return jsonRes({
+          mode, attempted: 1, fixed: 1,
+          results: [{ post_id: id, ok: true, removed_chars: 0 }],
+        });
+      }
+      const updateRes = await fetch(`${WP_BASE}/posts/${id}`, {
+        method: "POST",
+        headers: {
+          Authorization: auth, "Content-Type": "application/json",
+          "User-Agent": "GearupAudit/2.0",
+        },
+        body: JSON.stringify({ content: cleaned }),
+      });
+      if (!updateRes.ok) {
+        const t = await updateRes.text();
+        return jsonRes({
+          mode, attempted: 1, fixed: 0,
+          results: [{ post_id: id, ok: false, error: `Update ${updateRes.status}: ${t.slice(0, 160)}` }],
+        });
+      }
+      await updateRes.text();
+      await logEvent(id, `Re-wrapped orphan CSS (${removed} chars of wrappers removed)`);
+      return jsonRes({
+        mode, attempted: 1, fixed: 1,
+        results: [{ post_id: id, ok: true, removed_chars: removed }],
+      });
+    } catch (e) {
+      return jsonRes({
+        mode, attempted: 1, fixed: 0,
+        results: [{ post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) }],
+      });
     }
-
-    return jsonRes({ mode, attempted: results.length, fixed: results.filter((r) => r.ok).length, results });
   }
 
   return jsonRes({ error: "Unknown mode" }, 400);

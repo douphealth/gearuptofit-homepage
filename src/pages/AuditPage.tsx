@@ -291,17 +291,18 @@ function BulkCleanupPanel() {
     try {
       const all: LeakItem[] = [];
       let page = 1;
-      while (true) {
-        const r = await callAudit<{ count: number; affected: LeakItem[]; done: boolean; totalPages: number }>(
+      let totalPages = 1;
+      while (page <= 100) {
+        const r = await callAudit<{ count: number; affected: LeakItem[]; done: boolean; totalPages: number; page: number }>(
           "wp-bulk-cleanup",
-          { mode: "scan" },
+          { mode: "scan", page },
         );
+        totalPages = r.totalPages || totalPages;
         all.push(...r.affected);
         setItems([...all]);
-        setStatus(`Scanned CSS snippets · ${all.length} affected`);
+        setStatus(`Scanned page ${page}/${totalPages} · ${all.length} affected`);
         if (r.done) break;
         page++;
-        if (page > 5000) break;
       }
       toast({ title: `Scan complete`, description: `${all.length} posts contain leaked CSS.` });
     } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
@@ -310,19 +311,19 @@ function BulkCleanupPanel() {
 
   const fixAll = async () => {
     if (!items || items.length === 0) return;
-      if (!confirm(`Disable ${items.length} leaking Elementor snippet(s)? This fixes the global source that prints CSS at the top of posts. It does not edit blog post content.`)) return;
+    if (!confirm(`Re-wrap orphan CSS in ${items.length} post(s)? The orphan CSS that currently shows as visible text at the top of these posts will be moved back inside a single <style> tag. Live posts are updated in place.`)) return;
     setFixing(true);
     try {
       const ids = items.map((i) => i.post_id);
       const all: FixResult[] = [];
       for (let i = 0; i < ids.length; i += 1) {
-        setStatus(`Cleaning ${i + 1}/${ids.length} · snippet ${ids[i]}`);
+        setStatus(`Fixing ${i + 1}/${ids.length} · post ${ids[i]}`);
         const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]] });
         all.push(...r.results);
         setResults([...all]);
       }
       setResults(all);
-      const ok = all.filter((r) => r.ok && (r.removed_chars ?? 0) > 0).length;
+      const ok = all.filter((r) => r.ok).length;
       const failed = all.filter((r) => !r.ok).length;
       toast({ title: `Cleanup done`, description: `${ok} fixed, ${failed} failed.` });
     } catch (e: any) { toast({ title: "Cleanup failed", description: e.message, variant: "destructive" }); }
@@ -335,16 +336,16 @@ function BulkCleanupPanel() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <CardTitle className="text-base">Site-wide CSS leak cleanup</CardTitle>
-            <p className="text-xs text-muted-foreground mt-1">Scans published Elementor snippets for raw <code>.gutf-article {`{...}`}</code> CSS that is missing a <code>&lt;style&gt;</code> wrapper, then drafts the offending global snippet. This fixes the source instead of re-saving posts.</p>
+            <p className="text-xs text-muted-foreground mt-1">Scans every published post for orphan CSS rendered as visible text (the <code>.gutf-article {`{ ... !important }`}</code> block at the top of posts). The fix re-wraps the orphan CSS in a single <code>&lt;style&gt;</code> tag inside the post — preserving the design, removing the visible leak.</p>
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={scan} disabled={scanning || fixing}>
               {scanning ? <Loader2 className="size-4 animate-spin mr-2" /> : <RefreshCw className="size-4 mr-2" />}
-              {scanning && status ? status : "Scan CSS snippets"}
+              {scanning && status ? status : "Scan all posts"}
             </Button>
             <Button size="sm" variant="destructive" onClick={fixAll} disabled={fixing || scanning || !items || items.length === 0}>
               {fixing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
-              {fixing && status ? status : `Fix ${items?.length ?? 0} snippets`}
+              {fixing && status ? status : `Fix ${items?.length ?? 0} posts`}
             </Button>
           </div>
         </div>
