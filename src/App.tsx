@@ -11,6 +11,7 @@ import NutritionPage from "./pages/NutritionPage.tsx";
 import HealthPage from "./pages/HealthPage.tsx";
 import ReviewsPage from "./pages/ReviewsPage.tsx";
 import CalculatorsPage from "./pages/CalculatorsPage.tsx";
+import AuditPage from "./pages/AuditPage.tsx";
 
 const queryClient = new QueryClient();
 
@@ -28,6 +29,7 @@ const App = () => (
           <Route path="/health" element={<HealthPage />} />
           <Route path="/reviews" element={<ReviewsPage />} />
           <Route path="/calculators" element={<CalculatorsPage />} />
+          <Route path="/audit" element={<AuditPage />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

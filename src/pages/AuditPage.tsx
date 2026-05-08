@@ -331,16 +331,13 @@ function FixBlock({ label, value, mono = false }: { label: string; value: string
 
 export default function AuditPage() {
   const [authed, setAuthed] = useState(!!getAuditPw());
-
-  return (
-    <>
-      <Helmet>
-        <title>SEO Audit Dashboard · Private</title>
-        <meta name="robots" content="noindex,nofollow" />
-      </Helmet>
-      {authed
-        ? <Dashboard onLogout={() => { clearAuditPw(); setAuthed(false); }} />
-        : <LoginGate onAuth={() => setAuthed(true)} />}
-    </>
-  );
+  useEffect(() => {
+    document.title = "SEO Audit Dashboard · Private";
+    let m = document.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    if (!m) { m = document.createElement("meta"); m.name = "robots"; document.head.appendChild(m); }
+    m.content = "noindex,nofollow";
+  }, []);
+  return authed
+    ? <Dashboard onLogout={() => { clearAuditPw(); setAuthed(false); }} />
+    : <LoginGate onAuth={() => setAuthed(true)} />;
 }
