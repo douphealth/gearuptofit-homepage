@@ -1,1 +1,16 @@
 project_id = "ceieaftsnuuulzihdhyk"
+
+[functions.audit-verify]
+verify_jwt = false
+
+[functions.wp-fetch-posts]
+verify_jwt = false
+
+[functions.audit-score]
+verify_jwt = false
+
+[functions.audit-generate-fixes]
+verify_jwt = false
+
+[functions.wp-push-draft]
+verify_jwt = false
