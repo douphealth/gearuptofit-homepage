@@ -129,6 +129,10 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   };
 
   const runScan = async () => {
+    if (!posts.length) {
+      toast({ title: "No cached posts", description: "Run Refresh WP first." });
+      return;
+    }
     setScanning(true);
     try {
       let scanned = 0;
