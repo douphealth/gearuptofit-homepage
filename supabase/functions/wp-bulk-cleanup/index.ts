@@ -121,39 +121,38 @@ Deno.serve(async (req) => {
   if (!(await checkAuth(req))) return jsonRes({ error: "Unauthorized" }, 401);
 
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-  const { mode = "scan", post_ids, limit = 50 } = await req.json().catch(() => ({}));
+  const { mode = "scan", post_ids, limit = 50, page = 1, per_page = 25 } = await req.json().catch(() => ({}));
 
   const user = Deno.env.get("WP_USERNAME");
   const pass = Deno.env.get("WP_APP_PASSWORD");
 
+  // ── SCAN (single page per call to stay under memory limit) ──────────────
   if (mode === "scan") {
-    const affected: Array<{ post_id: number; link: string; title: string; preview: string }> = [];
-    const PER = 100;
-    for (let page = 1; page <= 50; page++) {
-      const r = await fetch(`${WP_BASE}/posts?per_page=${PER}&page=${page}&status=publish&_fields=id,link,title,content`, {
-        headers: { "User-Agent": "GearupAudit/1.0" },
-      });
-      if (r.status === 400) break;
-      if (!r.ok) return jsonRes({ error: `WP REST page ${page} failed: ${r.status}` }, 502);
-      const items = await r.json();
-      if (!Array.isArray(items) || items.length === 0) break;
+    const affected: Array<{ post_id: number; link: string; title: string }> = [];
+    const r = await fetch(`${WP_BASE}/posts?per_page=${per_page}&page=${page}&status=publish&_fields=id,link,title,content`, {
+      headers: { "User-Agent": "GearupAudit/1.0" },
+    });
+    if (r.status === 400) return jsonRes({ mode, page, per_page, count: 0, affected, totalPages: 0, done: true });
+    if (!r.ok) return jsonRes({ error: `WP REST page ${page} failed: ${r.status}` }, 502);
+    const totalPages = Number(r.headers.get("x-wp-totalpages") || 0);
+    const items = await r.json();
+    if (Array.isArray(items)) {
       for (const it of items) {
         const html = it?.content?.rendered || "";
+        // Quick anchor check first to avoid building a noStyle copy for every post.
+        if (!LEAK_ANCHORS.some((a) => html.includes(a))) continue;
         const noStyle = html.replace(/<style[\s\S]*?<\/style>/gi, "");
         if (LEAK_ANCHORS.some((a) => noStyle.includes(a))) {
           affected.push({
             post_id: it.id,
             link: it.link,
             title: (it.title?.rendered || "").replace(/<[^>]+>/g, ""),
-            preview: noStyle.slice(noStyle.indexOf(LEAK_ANCHORS.find((a) => noStyle.includes(a))!), noStyle.indexOf(LEAK_ANCHORS.find((a) => noStyle.includes(a))!) + 200),
           });
         }
       }
-      const totalPages = Number(r.headers.get("x-wp-totalpages") || 0);
-      if (totalPages && page >= totalPages) break;
-      if (items.length < PER) break;
     }
-    return jsonRes({ mode, count: affected.length, affected });
+    const done = !Array.isArray(items) || items.length < per_page || (totalPages > 0 && page >= totalPages);
+    return jsonRes({ mode, page, per_page, totalPages, count: affected.length, affected, done });
   }
 
   if (mode === "fix") {
