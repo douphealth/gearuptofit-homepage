@@ -1,6 +1,10 @@
 import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
 
+const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
+const MAX_BATCH = 5;
+const DETAIL_FIELDS = "id,slug,link,title,excerpt,content,modified_gmt,date_gmt,categories,tags,author,yoast_head_json";
+
 async function checkAuth(req: Request): Promise<boolean> {
   let body: any = {};
   try { body = await req.clone().json(); } catch { /* ignore */ }
@@ -26,6 +30,14 @@ function flesch(text: string): number {
 function monthsSince(iso?: string | null): number {
   if (!iso) return 999;
   return (Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24 * 30);
+}
+
+async function fetchPostDetails(postId: number) {
+  const r = await fetch(`${WP_BASE}/posts/${postId}?status=publish&_fields=${DETAIL_FIELDS}`, {
+    headers: { "User-Agent": "GearupAudit/1.0" },
+  });
+  if (!r.ok) return null;
+  return await r.json();
 }
 
 function scorePost(post: any) {
@@ -126,14 +138,22 @@ Deno.serve(async (req) => {
     });
   }
 
+  const body = await req.json().catch(() => ({}));
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const { data: posts, error } = await supabase
+  const ids = Array.isArray(body?.post_ids)
+    ? body.post_ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id)).slice(0, MAX_BATCH)
+    : [];
+
+  let query = supabase
     .from("wp_posts_cache")
     .select("post_id, slug, title, link, modified_at, data");
+  query = ids.length ? query.in("post_id", ids) : query.order("modified_at", { ascending: false }).limit(MAX_BATCH);
+
+  const { data: posts, error } = await query;
   if (error || !posts) {
     return new Response(JSON.stringify({ error: "No cached posts. Run fetch first." }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -144,7 +164,8 @@ Deno.serve(async (req) => {
   const histRows: any[] = [];
   const now = new Date().toISOString();
   for (const p of posts) {
-    const r = scorePost(p);
+    const details = await fetchPostDetails(Number(p.post_id));
+    const r = scorePost({ ...p, data: details || p.data });
     scoreRows.push({ post_id: p.post_id, score: r.score, issues: r.issues, metrics: r.metrics, scanned_at: now });
     histRows.push({ post_id: p.post_id, score: r.score, scanned_at: now });
   }
