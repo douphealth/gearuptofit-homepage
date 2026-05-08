@@ -147,11 +147,14 @@ Deno.serve(async (req) => {
   const ids = Array.isArray(body?.post_ids)
     ? body.post_ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id)).slice(0, MAX_BATCH)
     : [];
+  const refreshAll = body?.refresh_all === true;
 
   let query = supabase
     .from("wp_posts_cache")
     .select("post_id, slug, title, link, modified_at, data");
-  query = ids.length ? query.in("post_id", ids) : query.order("modified_at", { ascending: false }).limit(MAX_BATCH);
+  query = ids.length
+    ? query.in("post_id", ids)
+    : query.order("modified_at", { ascending: false }).limit(refreshAll ? MAX_BATCH : 0);
 
   const { data: posts, error } = await query;
   if (error || !posts) {
