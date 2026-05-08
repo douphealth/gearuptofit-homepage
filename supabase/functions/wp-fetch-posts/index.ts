@@ -3,7 +3,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
 
 const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
 const TTL_MIN = 15;
-const PER_PAGE = 25;
+const PER_PAGE = 10;
+const FIELDS = "id,slug,link,title,excerpt,content,modified_gmt,date_gmt,categories,tags,author,yoast_head_json";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -57,7 +58,7 @@ Deno.serve(async (req) => {
 
   if (mode === "fetch") {
     const page = Math.max(1, parseInt(body?.page ?? "1", 10));
-    const r = await fetch(`${WP_BASE}/posts?per_page=${PER_PAGE}&page=${page}&_embed=1&status=publish`, {
+    const r = await fetch(`${WP_BASE}/posts?per_page=${PER_PAGE}&page=${page}&status=publish&_fields=${FIELDS}`, {
       headers: { "User-Agent": "GearupAudit/1.0" },
     });
     if (!r.ok) {
