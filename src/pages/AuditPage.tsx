@@ -310,7 +310,7 @@ function BulkCleanupPanel() {
 
   const fixAll = async () => {
     if (!items || items.length === 0) return;
-    if (!confirm(`Clean ${items.length} posts? This rewrites the published content of each affected post (removes the leaked CSS text and re-wraps the rules in a proper <style> block). The site stays live throughout.`)) return;
+    if (!confirm(`Re-save ${items.length} posts? This re-publishes each affected post via the WordPress REST API to bust render caches. The actual leak source is theme/Elementor custom CSS injected at render time — if the leak persists after re-save, the post needs to be opened in wp-admin and the broken Custom CSS block removed manually. The site stays live throughout.`)) return;
     setFixing(true);
     try {
       const ids = items.map((i) => i.post_id);
