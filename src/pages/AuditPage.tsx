@@ -284,6 +284,7 @@ function BulkCleanupPanel() {
   const [fixing, setFixing] = useState(false);
   const [items, setItems] = useState<LeakItem[] | null>(null);
   const [results, setResults] = useState<FixResult[] | null>(null);
+  const [status, setStatus] = useState("");
 
   const scan = async () => {
     setScanning(true); setResults(null); setItems([]);
@@ -293,17 +294,18 @@ function BulkCleanupPanel() {
       while (true) {
         const r = await callAudit<{ count: number; affected: LeakItem[]; done: boolean; totalPages: number }>(
           "wp-bulk-cleanup",
-          { mode: "scan", page, per_page: 25 },
+          { mode: "scan", page, per_page: 1 },
         );
         all.push(...r.affected);
         setItems([...all]);
+        setStatus(`Scanned ${page}/${r.totalPages || "?"} WordPress pages · ${all.length} affected`);
         if (r.done) break;
         page++;
-        if (page > 200) break;
+        if (page > 5000) break;
       }
       toast({ title: `Scan complete`, description: `${all.length} posts contain leaked CSS.` });
     } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
-    setScanning(false);
+    setStatus(""); setScanning(false);
   };
 
   const fixAll = async () => {
@@ -312,21 +314,19 @@ function BulkCleanupPanel() {
     setFixing(true);
     try {
       const ids = items.map((i) => i.post_id);
-      // Process in batches of 20 to keep each invocation under the worker budget.
       const all: FixResult[] = [];
-      for (let i = 0; i < ids.length; i += 20) {
-        const batch = ids.slice(i, i + 20);
-        const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: batch, limit: 20 });
+      for (let i = 0; i < ids.length; i += 1) {
+        setStatus(`Cleaning ${i + 1}/${ids.length} · post ${ids[i]}`);
+        const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]] });
         all.push(...r.results);
+        setResults([...all]);
       }
       setResults(all);
       const ok = all.filter((r) => r.ok && (r.removed_chars ?? 0) > 0).length;
       const failed = all.filter((r) => !r.ok).length;
       toast({ title: `Cleanup done`, description: `${ok} fixed, ${failed} failed.` });
-      // Re-scan to confirm.
-      await scan();
     } catch (e: any) { toast({ title: "Cleanup failed", description: e.message, variant: "destructive" }); }
-    setFixing(false);
+    setStatus(""); setFixing(false);
   };
 
   return (
@@ -340,11 +340,11 @@ function BulkCleanupPanel() {
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={scan} disabled={scanning || fixing}>
               {scanning ? <Loader2 className="size-4 animate-spin mr-2" /> : <RefreshCw className="size-4 mr-2" />}
-              Scan all posts
+              {scanning && status ? status : "Scan all posts"}
             </Button>
             <Button size="sm" variant="destructive" onClick={fixAll} disabled={fixing || scanning || !items || items.length === 0}>
               {fixing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
-              Fix {items?.length ?? 0} posts
+              {fixing && status ? status : `Fix ${items?.length ?? 0} posts`}
             </Button>
           </div>
         </div>
