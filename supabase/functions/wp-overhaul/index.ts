@@ -311,7 +311,8 @@ async function generatePremiumContent(post: any, existingRaw: string, providedFi
 Your job: produce a #1-ranking, EEAT-grade, semantically rich, FULL-LENGTH blog post body.
 
 CRITICAL CONTENT REQUIREMENTS — non-negotiable:
-- sectionsHtml MUST contain at least ${MIN_BODY_H2} <section> blocks, each with one <h2> headline and 2-5 well-developed <p> paragraphs (plus optional <h3>, <ul>/<ol>, <table class="gutf-comparison">).
+- sectionsHtml MUST contain at least ${MIN_BODY_H2} <div class="gutf-section"> blocks, each with one <h2> headline and 2-5 well-developed <p> paragraphs (plus optional <h3>, <ul>/<ol>, <table class="gutf-comparison">).
+- DO NOT use <section>, <article>, <header>, <footer>, <aside> — WordPress KSES sanitizer strips them. Use <div class="gutf-section"> instead.
 - Total visible prose across sectionsHtml MUST be at least ${MIN_BODY_WORDS} words.
 - Cover the topic exhaustively — methodology, science, mistakes, programming, examples, comparisons, FAQ-adjacent depth.
 - Integrate semanticKeywords and entities naturally throughout the body.
@@ -325,12 +326,12 @@ Output STRICT JSON ONLY (no markdown fences). Schema:
   "semanticKeywords": string[] (12-20 LSI/related terms),
   "entities": string[] (8-15 named entities),
   "introHtml": string (1 punchy <p> with primary keyword in first sentence + 1 <p> stating user benefit; 60-110 words),
-  "sectionsHtml": string (the FULL article body — 5-8 <section> blocks meeting the requirements above),
-  "faqHtml": string (<section class="gutf-faq"><h2>Frequently Asked Questions</h2> 5-7 <div class="gutf-faq-item"><h3>Q</h3><p>A</p></div></section>),
+  "sectionsHtml": string (the FULL article body — 5-8 <div class="gutf-section"> blocks meeting the requirements above),
+  "faqHtml": string (<div class="gutf-faq"><h2>Frequently Asked Questions</h2> 5-7 <div class="gutf-faq-item"><h3>Q</h3><p>A</p></div></div>),
   "conclusionHtml": string (<div class="gutf-bottom-line"><h2>Bottom Line</h2><p>...</p></div>, 70-120 words),
   "jsonLd": object (schema.org Article + FAQPage @graph)
 }
-- HTML must be valid, semantic, mobile-friendly, NO inline width/height pixel styles, NO <script>, NO <style>.`;
+- HTML must be valid, semantic, mobile-friendly, NO inline width/height pixel styles, NO <script>, NO <style>, NO <section>/<article>/<header>/<footer>/<aside>.`;
 
   const usr = `TITLE: ${title}
 URL: ${link}
