@@ -1319,27 +1319,59 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
               {overhaulResult && (
                 <div className={`text-xs p-3 border rounded-md ${overhaulResult.ok ? "bg-emerald-500/10" : "bg-destructive/10"}`}>
                   <div className={`font-medium mb-1 ${overhaulResult.ok ? "text-emerald-500" : "text-destructive"}`}>
-                    {overhaulResult.ok ? "Published and verified on the public live URL" : "Not verified on the public live URL"}
+                    {overhaulResult.ok ? "Published and LIVE-visible verified" : "NOT live-visible verified"}
                   </div>
                   <div className="text-muted-foreground">{overhaulResult.message}</div>
                   {overhaulResult.content_source && <div className="mt-1 text-muted-foreground">Source: {overhaulResult.content_source}</div>}
+                  {(overhaulResult.body_word_count !== undefined || overhaulResult.body_h2_count !== undefined) && !overhaulResult.verification && (
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <MiniStat label="Generated words" value={overhaulResult.body_word_count ?? "—"} className={(overhaulResult.body_word_count ?? 0) >= 600 ? "text-emerald-500" : "text-destructive"} />
+                      <MiniStat label="Generated H2" value={overhaulResult.body_h2_count ?? "—"} className={(overhaulResult.body_h2_count ?? 0) >= 3 ? "text-emerald-500" : "text-destructive"} />
+                    </div>
+                  )}
                   {overhaulResult.verification && (
-                    <div className="mt-1 space-y-1 text-muted-foreground">
-                      <div>Public URL: {overhaulResult.verification.live_url || post.link}</div>
-                      <div>
-                        WP saved: {overhaulResult.verification.rest_has_run_marker ? "yes" : "no"} · Status published: {overhaulResult.verification.saved_status_publish ? "yes" : "no"} · Public live exact run: {overhaulResult.verification.live_has_run_marker ? "yes" : "no"}
-                      </div>
-                      <div>
-                        Live slot: {String(overhaulResult.verification.live_has_content_slot ?? "unknown")} · Live SEO markers: {overhaulResult.verification.live_has_signals ? "yes" : "no"} · HTTP: {overhaulResult.verification.live_status ?? "unknown"}
-                      </div>
-                      {(overhaulResult.verification.live_body_word_count !== undefined) && (
-                        <div className={overhaulResult.verification.live_body_ok ? "" : "text-destructive font-medium"}>
-                          Visible body on live URL: {overhaulResult.verification.live_body_word_count} words · {overhaulResult.verification.live_body_h2_count} H2 sections {overhaulResult.verification.live_body_ok ? "✓" : "✗ (post will look empty to readers)"}
+                    <div className="mt-3 space-y-3 text-muted-foreground">
+                      <div className="rounded-md border bg-background/50 p-3 space-y-2">
+                        <div className="font-medium text-foreground">LIVE VERIFICATION — public WordPress page</div>
+                        <a href={overhaulResult.verification.live_fetched_url || overhaulResult.verification.live_url || post.link} target="_blank" rel="noreferrer" className="text-primary underline inline-flex items-center gap-1 break-all">
+                          {overhaulResult.verification.live_url || post.link} <ExternalLink className="size-3 shrink-0" />
+                        </a>
+                        <div className="grid grid-cols-2 gap-2">
+                          <MiniStat label="Visible words" value={`${overhaulResult.verification.live_body_word_count ?? 0}/${overhaulResult.verification.live_min_word_count ?? 600}`} className={overhaulResult.verification.live_body_ok ? "text-emerald-500" : "text-destructive"} />
+                          <MiniStat label="Visible H2" value={`${overhaulResult.verification.live_body_h2_count ?? 0}/${overhaulResult.verification.live_min_h2_count ?? 3}`} className={overhaulResult.verification.live_body_ok ? "text-emerald-500" : "text-destructive"} />
                         </div>
+                        <div className={overhaulResult.verification.live_body_ok ? "text-emerald-500 font-medium" : "text-destructive font-medium"}>
+                          Verdict: {overhaulResult.verification.live_body_ok ? "PASS — readers can see a substantial article" : "FAIL — public page is still empty/thin for readers"}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <MiniStat label="HTTP" value={overhaulResult.verification.live_status ?? "unknown"} />
+                        <MiniStat label="Attempts" value={overhaulResult.verification.live_attempts ?? "—"} />
+                        <MiniStat label="WP saved marker" value={overhaulResult.verification.rest_has_run_marker ? "yes" : "no"} className={overhaulResult.verification.rest_has_run_marker ? "text-emerald-500" : "text-destructive"} />
+                        <MiniStat label="Live exact run" value={overhaulResult.verification.live_has_run_marker ? "yes" : "no"} className={overhaulResult.verification.live_has_run_marker ? "text-emerald-500" : "text-destructive"} />
+                        <MiniStat label="Status published" value={overhaulResult.verification.saved_status_publish ? "yes" : "no"} className={overhaulResult.verification.saved_status_publish ? "text-emerald-500" : "text-destructive"} />
+                        <MiniStat label="Content source" value={overhaulResult.verification.live_content_source || "unknown"} />
+                      </div>
+                      <div>
+                        REST body saved: {overhaulResult.verification.rest_body_word_count ?? 0} words · {overhaulResult.verification.rest_body_h2_count ?? 0} H2 · Live slot: {String(overhaulResult.verification.live_has_content_slot ?? "unknown")} · SEO markers: {overhaulResult.verification.live_has_signals ? "yes" : "no"}
+                      </div>
+                      {overhaulResult.verification.live_heading_samples?.length > 0 && (
+                        <div>
+                          <div className="font-medium text-foreground mb-1">Visible H2 headings detected</div>
+                          <ul className="list-disc pl-5 space-y-1">
+                            {overhaulResult.verification.live_heading_samples.map((h: string, i: number) => <li key={i}>{h}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {overhaulResult.verification.live_text_sample && (
+                        <details>
+                          <summary className="cursor-pointer font-medium text-foreground">Visible text sample</summary>
+                          <div className="mt-1 rounded border bg-background/50 p-2 whitespace-pre-wrap">{overhaulResult.verification.live_text_sample}</div>
+                        </details>
                       )}
                     </div>
                   )}
-                  {overhaulResult.visual && <div className="mt-1 text-muted-foreground">Visual score: {overhaulResult.visual.score}/100</div>}
+                  {overhaulResult.visual && <div className="mt-2 text-muted-foreground">Visual score: {overhaulResult.visual.score}/100{overhaulResult.visual.issues?.length ? ` · Issues: ${overhaulResult.visual.issues.join(", ")}` : ""}</div>}
                   <div className="mt-1 flex flex-wrap gap-1">
                     {overhaulResult.changes.map((c, i) => <Badge key={i} variant="secondary">{c}</Badge>)}
                   </div>
