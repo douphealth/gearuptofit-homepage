@@ -1046,7 +1046,7 @@ Deno.serve(async (req) => {
     (typeof post?.content?.raw === "string" && post.content.raw) ||
     (typeof post?.content?.rendered === "string" && post.content.rendered) ||
     "";
-  const originalRaw = raw;
+  const originalRaw = raw.length > MAX_RAW_TRANSFORM_CHARS ? "" : raw;
   let contentSource = raw.trim() ? (typeof post?.content?.raw === "string" && post.content.raw ? "rest_raw" : "rest_rendered") : "empty";
   let publicPageHtml = "";
   // If raw is empty (edit context returned rendered-only blank), try view context which always returns rendered HTML
@@ -1091,6 +1091,7 @@ Deno.serve(async (req) => {
     raw = compactedRaw.raw;
     contentSource = `${contentSource}+truncated_for_worker_memory`;
   }
+  post = { id: post?.id, link: post?.link, status: post?.status, date_gmt: post?.date_gmt, title: post?.title, excerpt: post?.excerpt };
 
 
   // 1b. Premium AI generation only when explicitly requested; otherwise use
