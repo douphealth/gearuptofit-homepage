@@ -822,6 +822,15 @@ function BulkCleanupPanel() {
             <Button size="sm" variant="outline" onClick={rollbackAllSucceeded} disabled={fixing || scanning || !results?.some((r) => r.ok && !r.dry_run && !r.rolled_back)} title="Restore previously-fixed posts to their pre-fix backup">
               Rollback fixed
             </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={fixFailedOnly}
+              disabled={fixing || scanning || !results?.some((r) => !r.dry_run && (!r.ok || r.rolled_back || (typeof r.http_status === "number" && (r.http_status < 200 || r.http_status >= 300))))}
+              title="Re-run fix only on posts whose last result was non-2xx, errored, or was rolled back"
+            >
+              Fix failed only
+            </Button>
             {resumable && (
               <Button size="sm" variant="default" onClick={() => (resumable.phase === "fix" ? fixAll(true) : scan(true))} disabled={scanning || fixing} title={`Resume interrupted ${resumable.phase} from ${resumable.updated_at}`}>
                 Resume {resumable.phase} ({resumable.processed} done)
