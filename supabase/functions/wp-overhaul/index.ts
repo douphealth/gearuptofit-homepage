@@ -365,7 +365,7 @@ async function fetchCleanWithCacheBypass(cleanUrl: string) {
       Cookie: `gutf_bust=${Date.now()}_${Math.random().toString(36).slice(2)}`,
     },
   });
-  return { ok: res.ok, status: res.status, html: await res.text().catch(() => ""), cf: res.headers.get("cf-cache-status") || null, age: res.headers.get("age") || null };
+  return { ok: res.ok, status: res.status, html: await readLimitedText(res), cf: res.headers.get("cf-cache-status") || null, age: res.headers.get("age") || null };
 }
 
 function runMarker(runId: string): string {
@@ -383,6 +383,38 @@ function containsRunMarker(html: string, runId: string): boolean {
 
 const LIVE_MIN_VISIBLE_WORDS = 600;
 const LIVE_MIN_VISIBLE_H2 = 3;
+const MAX_HTML_READ_BYTES = 700_000;
+
+async function readLimitedText(res: Response, maxBytes = MAX_HTML_READ_BYTES): Promise<string> {
+  if (!res.body) return await res.text().catch(() => "");
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { value, done } = await reader.read();
+      if (done || !value) break;
+      const remaining = maxBytes - total;
+      chunks.push(value.length > remaining ? value.slice(0, remaining) : value);
+      total += Math.min(value.length, remaining);
+      if (value.length > remaining) break;
+    }
+    if (total >= maxBytes) await reader.cancel().catch(() => undefined);
+  } catch {
+    await reader.cancel().catch(() => undefined);
+  }
+  return new TextDecoder().decode(concatChunks(chunks, total));
+}
+
+function concatChunks(chunks: Uint8Array[], total: number): Uint8Array {
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
 
 function stripInvisibleHtml(html: string): string {
   return String(html || "")
