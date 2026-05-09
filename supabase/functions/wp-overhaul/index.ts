@@ -1152,7 +1152,7 @@ Deno.serve(async (req) => {
   if (finalMetaTitle) updateBody.title = finalMetaTitle;
   if (finalMetaDesc) updateBody.excerpt = finalMetaDesc;
 
-  const updateRes = await fetch(`${WP_BASE}/posts/${postId}`, {
+  const updateRes = await fetch(`${WP_BASE}/posts/${postId}?_fields=id,link,status`, {
     method: "POST",
     headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/3.0" },
     body: JSON.stringify(updateBody),
