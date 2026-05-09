@@ -475,8 +475,10 @@ Deno.serve(async (req) => {
   const runId = crypto.randomUUID();
   await backupPostContent(postId, runId, originalRaw || raw, post?.status, post?.date_gmt);
   const updateBody: Record<string, unknown> = { content: html, status: "publish" };
-  if (typeof fixes.metaTitle === "string" && fixes.metaTitle.trim()) updateBody.title = fixes.metaTitle.trim();
-  if (typeof fixes.metaDescription === "string" && fixes.metaDescription.trim()) updateBody.excerpt = fixes.metaDescription.trim();
+  const finalMetaTitle = (typeof enriched.metaTitle === "string" && enriched.metaTitle.trim()) ? enriched.metaTitle.trim() : "";
+  const finalMetaDesc = (typeof enriched.metaDescription === "string" && enriched.metaDescription.trim()) ? enriched.metaDescription.trim() : "";
+  if (finalMetaTitle) updateBody.title = finalMetaTitle;
+  if (finalMetaDesc) updateBody.excerpt = finalMetaDesc;
 
   const updateRes = await fetch(`${WP_BASE}/posts/${postId}`, {
     method: "POST",
@@ -497,6 +499,7 @@ Deno.serve(async (req) => {
   const restHasSignals = containsAppliedSignal(verifyContent);
   let liveHasContentSlot: boolean | null = null;
   let liveHasSignals = false;
+  let visualReport: { score: number; checks: Record<string, boolean | number>; issues: string[] } | null = null;
   try {
     const link = String(updatedPost?.link || post?.link || "");
     if (link) {
@@ -505,16 +508,25 @@ Deno.serve(async (req) => {
         const liveHtml = await liveRes.text();
         liveHasContentSlot = hasLiveContentSlot(liveHtml);
         liveHasSignals = containsAppliedSignal(liveHtml);
+        // Validate the live article zone, not the whole document
+        const articleZone = (() => {
+          const idx = liveHtml.search(/<(article|main)\b/i);
+          if (idx < 0) return liveHtml;
+          const tag = (liveHtml.slice(idx).match(/<(article|main)\b/i) || ["", "article"])[1].toLowerCase();
+          return findBalancedElement(liveHtml, tag, idx) || liveHtml;
+        })();
+        visualReport = visualValidate(articleZone);
       }
     }
   } catch { /* live verification is best-effort */ }
 
   if (!restHasSignals) {
     await logEvent(postId, `Overhaul write failed verification; rolled back required (${changes.join(", ")})`, false);
-    return jsonRes({ ok: false, post_id: postId, changes, message: "WordPress accepted the request, but the saved post content did not contain the overhaul markers. No reliable live change was confirmed.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals } }, 200);
+    return jsonRes({ ok: false, post_id: postId, changes, message: "WordPress accepted the request, but the saved post content did not contain the overhaul markers. No reliable live change was confirmed.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals }, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } }, 200);
   }
 
   const visible = liveHasContentSlot !== false || liveHasSignals;
-  await logEvent(postId, `Overhauled and verified: ${changes.join(", ")} (source=${contentSource})`, true);
-  return jsonRes({ ok: true, post_id: postId, changes, message: visible ? `Applied, published, and verified: ${changes.join(", ")}` : "Saved and published in WordPress post content, but the live template does not appear to render post content. The WordPress update is verified; check the Elementor single-post template if the public page still looks unchanged.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals } });
+  const visualScore = visualReport?.score ?? null;
+  await logEvent(postId, `Overhauled and verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"})`, true);
+  return jsonRes({ ok: true, post_id: postId, changes, message: visible ? `Applied, published, and verified (visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}` : "Saved and published in WordPress post content, but the live template does not appear to render post content. Check the Elementor/single-post template.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals }, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
 });
