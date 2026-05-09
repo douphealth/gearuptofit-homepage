@@ -292,11 +292,21 @@ Deno.serve(async (req) => {
         });
       }
       const { html: cleaned, removed } = rewrapOrphanCss(raw);
-      if (cleaned === raw) {
+      const wantsPublish = body.publish === true || body.publish === "true";
+      const contentChanged = cleaned !== raw;
+      if (!contentChanged && !wantsPublish) {
         return jsonRes({
           mode, attempted: 1, fixed: 1,
-          results: [{ post_id: id, ok: true, removed_chars: 0 }],
+          results: [{ post_id: id, ok: true, removed_chars: 0, published: false }],
         });
+      }
+      // Build update payload. When publish=true, also bump status and modified
+      // date so WP fires the post_updated hook (purges page caches & CDN).
+      const payload: Record<string, unknown> = {};
+      if (contentChanged) payload.content = cleaned;
+      if (wantsPublish) {
+        payload.status = "publish";
+        payload.date_gmt = new Date().toISOString().replace(/\.\d+Z$/, "");
       }
       const updateRes = await fetch(`${WP_BASE}/posts/${id}`, {
         method: "POST",
@@ -304,7 +314,7 @@ Deno.serve(async (req) => {
           Authorization: auth, "Content-Type": "application/json",
           "User-Agent": "GearupAudit/2.0",
         },
-        body: JSON.stringify({ content: cleaned }),
+        body: JSON.stringify(payload),
       });
       if (!updateRes.ok) {
         const t = await updateRes.text();
@@ -314,10 +324,10 @@ Deno.serve(async (req) => {
         });
       }
       await updateRes.text();
-      await logEvent(id, `Re-wrapped orphan CSS (${removed} chars of wrappers removed)`);
+      await logEvent(id, `Re-wrapped orphan CSS (${removed} chars wrappers removed)${wantsPublish ? " · republished" : ""}`);
       return jsonRes({
         mode, attempted: 1, fixed: 1,
-        results: [{ post_id: id, ok: true, removed_chars: removed }],
+        results: [{ post_id: id, ok: true, removed_chars: removed, published: wantsPublish }],
       });
     } catch (e) {
       return jsonRes({
