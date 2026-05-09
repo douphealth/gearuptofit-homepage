@@ -309,7 +309,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                 );
               })}
               {!ranked.length && !loading && (
-                <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No posts. Click "Refresh WP" then "Re-score all".</td></tr>
+                <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No posts. Click "Refresh WP" then "Re-score all".</td></tr>
               )}
             </tbody>
           </table>
