@@ -844,6 +844,10 @@ function BulkCleanupPanel() {
               <input type="checkbox" checked={autoRollback} onChange={(e) => setAutoRollback(e.target.checked)} className="size-3.5 accent-primary" />
               Auto-rollback on failure
             </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" title="After every successful fix/republish, re-fetch the post via REST + live URL (cache-busted) to confirm the orphan CSS is correctly re-wrapped.">
+              <input type="checkbox" checked={autoVerify} onChange={(e) => setAutoVerify(e.target.checked)} className="size-3.5 accent-primary" />
+              Auto-verify after publish
+            </label>
             <Button size="sm" variant="outline" onClick={exportCsv} disabled={!items || items.length === 0}>Export CSV</Button>
             <Button size="sm" variant="outline" onClick={exportJson} disabled={!items || items.length === 0}>Export JSON</Button>
           </div>
