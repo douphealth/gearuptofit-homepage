@@ -384,10 +384,46 @@ async function applyToLivePost(supabase: any, postId: number, suggestions: Sugge
       }
       cursor = matchEnd;
     }
-    if (!inserted) continue;
+    if (!inserted) {
+      skipped.push({ targetId: s.targetId, anchor: s.anchor, targetUrl: s.targetUrl, reason: "anchor_not_found_or_inside_heading_or_link" });
+    }
   }
 
-  if (!applied.length) return { applied: 0, links: [] };
+  // Reconcile stale DB markers BEFORE early-return so the audit log self-heals
+  // even when an apply run inserts nothing (e.g. all anchors already in live).
+  let reconciled_stale_markers = 0;
+  try {
+    const { data: storedMarkers } = await supabase
+      .from("autolink_markers").select("id, target_id").eq("post_id", postId);
+    const liveTargetIds = new Set<number>(autolinkMarkerRanges(raw).map((r) => r.targetId));
+    // Also count any href that points to the target URL as "live" — handles
+    // the case where markers were stripped but the <a> tag survived.
+    const liveHrefs = existingLinks(raw);
+    const staleIds: number[] = [];
+    for (const m of storedMarkers || []) {
+      if (liveTargetIds.has(Number(m.target_id))) continue;
+      // We'd need URL to cross-check hrefs, but target_id alone is enough:
+      // if the marker comment is gone AND we have no record of its URL in
+      // liveHrefs we still can't be 100% sure — fetch target_url too.
+      staleIds.push(Number((m as any).id));
+    }
+    if (staleIds.length) {
+      // Refine: only delete rows whose target_url is also absent from liveHrefs
+      const { data: full } = await supabase
+        .from("autolink_markers").select("id, target_url").in("id", staleIds);
+      const trulyStale = (full || [])
+        .filter((r: any) => !liveHrefs.has(normalizeUrl(r.target_url)))
+        .map((r: any) => r.id);
+      if (trulyStale.length) {
+        await supabase.from("autolink_markers").delete().in("id", trulyStale);
+        reconciled_stale_markers = trulyStale.length;
+      }
+    }
+  } catch { /* non-fatal */ }
+
+  if (!applied.length) {
+    return { applied: 0, links: [], skipped, reconciled_stale_markers };
+  }
 
   const updateRes = await fetch(`${WP_BASE}/posts/${postId}`, {
     method: "POST",
@@ -411,7 +447,7 @@ async function applyToLivePost(supabase: any, postId: number, suggestions: Sugge
     })),
   );
 
-  return { applied: applied.length, links: applied };
+  return { applied: applied.length, links: applied, skipped, reconciled_stale_markers };
 }
 
 Deno.serve(async (req) => {
