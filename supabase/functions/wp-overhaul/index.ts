@@ -445,17 +445,24 @@ Deno.serve(async (req) => {
     await logEvent(postId, `Recovered empty editable content with generated seed (${diag}; live_slot=${hasSlot})`, true);
   }
 
+
+  // 1b. Premium AI generation (SOTA, semantic, outranking content) — merged with caller fixes.
+  const enriched = premiumQuality ? await generatePremiumContent(post, raw, fixes) : (fixes || {});
+
   // 2. Visual transforms
   const visual = applyVisualFixes(raw);
   let html = visual.html;
   const changes: string[] = [...visual.changes];
 
-  // 3. Inject blocks
+  // 3. Inject blocks (responsive CSS first so it sits above content)
   const css = ensureResponsiveCss(html); html = css.html; if (css.added) changes.push("responsive-css");
-  const intro = injectIntro(html, fixes.introHtml); html = intro.html; if (intro.added) changes.push("intro");
-  const concl = injectConclusion(html, fixes.conclusionHtml); html = concl.html; if (concl.added) changes.push("conclusion");
-  const faq = injectFaq(html, fixes.faqHtml); html = faq.html; if (faq.added) changes.push("faq");
-  const ld = injectJsonLd(html, fixes.jsonLd); html = ld.html; if (ld.added) changes.push("jsonld");
+  const intro = injectIntro(html, enriched.introHtml); html = intro.html; if (intro.added) changes.push("intro");
+  const sections = injectSections(html, enriched.sectionsHtml); html = sections.html; if (sections.added) changes.push("premium-sections");
+  const concl = injectConclusion(html, enriched.conclusionHtml); html = concl.html; if (concl.added) changes.push("conclusion");
+  const faq = injectFaq(html, enriched.faqHtml); html = faq.html; if (faq.added) changes.push("faq");
+  const ld = injectJsonLd(html, enriched.jsonLd); html = ld.html; if (ld.added) changes.push("jsonld");
+  // Re-run visual transforms over AI-injected blocks (lazy imgs, table wrap, iframe wrap)
+  const visual2 = applyVisualFixes(html); html = visual2.html; changes.push(...visual2.changes.map((c) => `post:${c}`));
 
   if (dryRun) return jsonRes({ ok: true, dry_run: true, changes, preview: html.slice(0, 4000) });
 
