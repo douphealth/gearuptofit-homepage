@@ -782,13 +782,14 @@ Deno.serve(async (req) => {
   const enrichedRaw = premiumQuality ? await generatePremiumContent(post, raw, fixes) : (fixes || {});
   // KSES sanitization: strip <section>/<article> from any AI/caller HTML so the body
   // actually survives the WordPress REST update (Application Passwords lack unfiltered_html).
-  const enriched: Record<string, any> = {
+  let enriched: Record<string, any> = {
     ...enrichedRaw,
     introHtml: ksesSafe(enrichedRaw.introHtml || ""),
     sectionsHtml: ksesSafe(enrichedRaw.sectionsHtml || ""),
     faqHtml: ksesSafe(enrichedRaw.faqHtml || ""),
     conclusionHtml: ksesSafe(enrichedRaw.conclusionHtml || ""),
   };
+  enriched = ensurePublishableFallback(enriched, post, raw);
 
   // 2. Visual transforms — also strip leftover <section>/<article> from existing raw,
   // so an old post that had its body stripped by KSES gets fully rewritten.
