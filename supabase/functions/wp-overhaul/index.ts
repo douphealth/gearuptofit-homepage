@@ -381,6 +381,32 @@ function containsRunMarker(html: string, runId: string): boolean {
   return !!runId && String(html || "").includes(runMarker(runId));
 }
 
+async function readJsonLimited(res: Response, maxBytes = MAX_WP_JSON_READ_BYTES): Promise<any> {
+  const text = await readLimitedText(res, maxBytes);
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+function compactWpPost(value: any): any {
+  if (!value || typeof value !== "object") return value;
+  return {
+    id: value.id,
+    link: value.link,
+    status: value.status,
+    date_gmt: value.date_gmt,
+    title: { raw: value.title?.raw, rendered: value.title?.rendered },
+    excerpt: { raw: value.excerpt?.raw, rendered: value.excerpt?.rendered },
+    content: { raw: value.content?.raw, rendered: value.content?.rendered },
+  };
+}
+
+function compactRawHtml(raw: string): { raw: string; truncated: boolean } {
+  const value = String(raw || "");
+  if (value.length <= MAX_RAW_TRANSFORM_CHARS) return { raw: value, truncated: false };
+  const head = value.slice(0, Math.floor(MAX_RAW_TRANSFORM_CHARS * 0.82));
+  const tail = value.slice(-Math.floor(MAX_RAW_TRANSFORM_CHARS * 0.18));
+  return { raw: `${head}\n<!--gutf:source-truncated-for-worker-memory-->\n${tail}`, truncated: true };
+}
+
 const LIVE_MIN_VISIBLE_WORDS = 600;
 const LIVE_MIN_VISIBLE_H2 = 3;
 const MAX_HTML_READ_BYTES = 260_000;
