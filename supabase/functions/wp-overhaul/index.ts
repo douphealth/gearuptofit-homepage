@@ -303,18 +303,24 @@ Deno.serve(async (req) => {
   }
   if (!raw.trim()) {
     const diag = `status=${post?.status} hasContent=${!!post?.content} keys=${post?.content ? Object.keys(post.content).join(",") : "none"}`;
-    await logEvent(postId, `Skipped: empty content (${diag})`, true);
-    // Return 200 with skipped flag so the UI doesn't surface a runtime error / blank screen.
-    // This commonly happens when a post is built entirely by a page-builder (Elementor/Divi/Bricks)
-    // that stores HTML in post meta instead of post_content.
-    return jsonRes({
-      ok: true,
-      skipped: true,
-      post_id: postId,
-      changes: ["skipped-empty"],
-      reason: "page-builder-or-empty",
-      detail: `Post has no content in WP REST (${diag}). Likely built with a page-builder (Elementor/Divi/Bricks) that stores HTML outside post_content. Edit this post manually in WordPress.`,
-    });
+    const hasSlot = publicPageHtml ? hasLiveContentSlot(publicPageHtml) : false;
+    const seed = buildSeedContent(fixes);
+    if (!seed || !hasSlot) {
+      await logEvent(postId, `Blocked: empty editable content (${diag})`, false);
+      return jsonRes({
+        ok: false,
+        skipped: true,
+        post_id: postId,
+        changes: ["blocked-empty-content"],
+        reason: hasSlot ? "no-generated-content" : "no-editable-post-content",
+        message: hasSlot
+          ? "WordPress returned empty post content and there were no generated blocks to publish."
+          : "WordPress returned empty post content and the live page has no editable article content slot. This is likely an Elementor/template-only post.",
+        detail: `No live write was made. ${diag}.`,
+      }, 200);
+    }
+    raw = seed;
+    contentSource = "generated_seed_empty_rest";
   }
 
   // 2. Visual transforms
@@ -337,6 +343,8 @@ Deno.serve(async (req) => {
   }
 
   // 4. PUT update
+  const runId = crypto.randomUUID();
+  await backupPostContent(postId, runId, originalRaw || raw, post?.status, post?.date_gmt);
   const updateBody: Record<string, unknown> = { content: html };
   if (typeof fixes.metaTitle === "string" && fixes.metaTitle.trim()) updateBody.title = fixes.metaTitle.trim();
   if (typeof fixes.metaDescription === "string" && fixes.metaDescription.trim()) updateBody.excerpt = fixes.metaDescription.trim();
