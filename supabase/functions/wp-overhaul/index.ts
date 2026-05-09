@@ -250,10 +250,10 @@ Deno.serve(async (req) => {
   if (!user || !pass) return jsonRes({ error: "WP credentials not configured" }, 500);
   const auth = "Basic " + btoa(`${user}:${pass}`);
 
-  // 1. Fetch raw content (context=edit). Fallback to context=view if raw is empty
-  // (happens when the app-password user lacks edit_posts cap on this post type).
+  // 1. Fetch editable content. Some Elementor/template posts legitimately return
+  // empty post_content; those must be detected instead of reported as "applied".
   async function fetchPost(ctx: "edit" | "view") {
-    const r = await fetch(`${WP_BASE}/posts/${postId}?context=${ctx}&_fields=id,title,excerpt,content,status`, {
+    const r = await fetch(`${WP_BASE}/posts/${postId}?context=${ctx}&_fields=id,link,title,excerpt,content,status,date_gmt`, {
       headers: { Authorization: auth, "User-Agent": "GearupAudit/3.0" },
     });
     return { ok: r.ok, status: r.status, body: r.ok ? await r.json() : await r.text() };
@@ -270,6 +270,9 @@ Deno.serve(async (req) => {
     (typeof post?.content?.raw === "string" && post.content.raw) ||
     (typeof post?.content?.rendered === "string" && post.content.rendered) ||
     "";
+  const originalRaw = raw;
+  let contentSource = raw.trim() ? (typeof post?.content?.raw === "string" && post.content.raw ? "rest_raw" : "rest_rendered") : "empty";
+  let publicPageHtml = "";
   // If raw is empty (edit context returned rendered-only blank), try view context which always returns rendered HTML
   if (!raw.trim()) {
     const g2 = await fetchPost("view");
@@ -281,26 +284,18 @@ Deno.serve(async (req) => {
         "";
     }
   }
-  // Last-resort fallback: fetch the public post HTML from APEX and extract <article> / main content
+  // Last-resort fallback: extract visible article content from the public URL.
   if (!raw.trim()) {
     try {
       const link: string | undefined = post?.link;
       if (link) {
         const pageRes = await fetch(link, { headers: { "User-Agent": "GearupAudit/3.0", "Cache-Control": "no-cache" } });
         if (pageRes.ok) {
-          const pageHtml = await pageRes.text();
-          // Extract <article>...</article> or fall back to <main>
-          const articleMatch = pageHtml.match(/<article\b[\s\S]*?<\/article>/i);
-          const mainMatch = !articleMatch ? pageHtml.match(/<main\b[\s\S]*?<\/main>/i) : null;
-          const extracted = articleMatch?.[0] || mainMatch?.[0] || "";
-          // Strip script/style/header/footer/nav/aside to keep just content
-          if (extracted) {
-            raw = extracted
-              .replace(/<script\b[\s\S]*?<\/script>/gi, "")
-              .replace(/<style\b[\s\S]*?<\/style>/gi, "")
-              .replace(/<header\b[\s\S]*?<\/header>/gi, "")
-              .replace(/<footer\b[\s\S]*?<\/footer>/gi, "")
-              .replace(/<nav\b[\s\S]*?<\/nav>/gi, "");
+          publicPageHtml = await pageRes.text();
+          const extracted = extractPublicPostContent(publicPageHtml);
+          if (extracted.html) {
+            raw = extracted.html;
+            contentSource = `public_${extracted.source}`;
           }
         }
       }
