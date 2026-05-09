@@ -926,6 +926,7 @@ function BulkCleanupPanel() {
                   <th className="p-2">Publish</th>
                   <th className="p-2">HTTP</th>
                   <th className="p-2">Diff</th>
+                  <th className="p-2" title="Post-publish verification: re-fetch via REST + live URL (cache-busted) to confirm the orphan CSS is correctly re-wrapped.">Verified</th>
                   <th className="p-2">When</th>
                 </tr>
               </thead>
