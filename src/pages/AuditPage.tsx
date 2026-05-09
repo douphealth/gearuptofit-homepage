@@ -807,24 +807,28 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
               </CardHeader>
               <CardContent className="text-xs grid grid-cols-3 gap-3">
                 <div>
-                  <div className="font-semibold mb-1">LCP</div>
+                  <div className="font-semibold mb-1 flex items-center gap-2">LCP <Badge variant="outline">{cwv.lcpScore ?? "—"}</Badge></div>
                   <div className="text-muted-foreground">Hero priority: {cwv.lcp?.heroFetchPriority ? "✓" : "✗"}</div>
                   <div className="text-muted-foreground">Hero lazy: {cwv.lcp?.heroLazy ? "⚠ yes" : "✓ no"}</div>
                   <div className="text-muted-foreground">Format: {cwv.lcp?.heroFormat}</div>
                   <div className="text-muted-foreground">Eager above-fold: {cwv.lcp?.eagerAboveFold}</div>
+                  <div className="text-muted-foreground">Oversized imgs: {cwv.lcp?.oversizedImages ?? 0}</div>
                 </div>
                 <div>
-                  <div className="font-semibold mb-1">CLS</div>
+                  <div className="font-semibold mb-1 flex items-center gap-2">CLS <Badge variant="outline">{cwv.clsScore ?? "—"}</Badge></div>
                   <div className="text-muted-foreground">Imgs no-dims: {cwv.cls?.imagesMissingDims}</div>
                   <div className="text-muted-foreground">Iframes no-dims: {cwv.cls?.iframesMissingDims}</div>
                   <div className="text-muted-foreground">Ads no-reserve: {cwv.cls?.adsWithoutReserve}</div>
+                  <div className="text-muted-foreground">Tables unwrapped: {cwv.cls?.unwrappedTables ?? 0}</div>
+                  <div className="text-muted-foreground">Fixed iframes: {cwv.cls?.fixedWidthIframes ?? 0}</div>
                 </div>
                 <div>
-                  <div className="font-semibold mb-1">INP</div>
+                  <div className="font-semibold mb-1 flex items-center gap-2">INP <Badge variant="outline">{cwv.inpScore ?? "—"}</Badge></div>
                   <div className="text-muted-foreground">Inline scripts: {cwv.inp?.inlineScripts}</div>
                   <div className="text-muted-foreground">Heavy: {cwv.inp?.heavyInlineScripts}</div>
                   <div className="text-muted-foreground">Blocking: {cwv.inp?.blockingScripts}</div>
                   <div className="text-muted-foreground">DOM nodes: {cwv.domNodes}</div>
+                  <div className="text-muted-foreground">Overflow elems: {cwv.layoutOverflowCount ?? 0}</div>
                 </div>
               </CardContent>
             </Card>
