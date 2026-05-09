@@ -215,7 +215,27 @@ function cleanPublicUrl(url: string): string {
   }
 }
 
-async function purgeCloudflareUrl(url: string) {
+function urlVariants(cleanUrl: string): string[] {
+  const out = new Set<string>();
+  try {
+    const u = new URL(cleanUrl);
+    const hosts = [u.hostname, u.hostname.startsWith("www.") ? u.hostname.slice(4) : `www.${u.hostname}`];
+    const protos = ["https:", "http:"];
+    const path = u.pathname.endsWith("/") ? u.pathname : `${u.pathname}/`;
+    const pathNoSlash = path.endsWith("/") ? path.slice(0, -1) : path;
+    for (const host of hosts) for (const proto of protos) for (const p of [path, pathNoSlash]) {
+      if (!p) continue;
+      out.add(`${proto}//${host}${p}`);
+      out.add(`${proto}//${host}${p}?utm_source=gutf-purge`);
+    }
+  } catch {
+    out.add(cleanUrl);
+    out.add(cleanUrl.endsWith("/") ? cleanUrl.slice(0, -1) : `${cleanUrl}/`);
+  }
+  return Array.from(out);
+}
+
+async function purgeCloudflareUrl(url: string, rounds = 1) {
   const token = Deno.env.get("CLOUDFLARE_API_TOKEN");
   const cleanUrl = cleanPublicUrl(url);
   if (!token || !cleanUrl) return { attempted: false, ok: false, reason: token ? "missing_url" : "missing_token" };
@@ -233,20 +253,56 @@ async function purgeCloudflareUrl(url: string) {
     const zoneId = zones?.result?.[0]?.id;
     if (!zonesRes.ok || !zoneId) return { attempted: true, ok: false, stage: "zone_lookup", status: zonesRes.status, detail: zonesText.slice(0, 240) };
 
-    const variants = Array.from(new Set([
-      cleanUrl,
-      cleanUrl.endsWith("/") ? cleanUrl.slice(0, -1) : `${cleanUrl}/`,
-    ]));
-    const purgeRes = await cfFetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`, {
-      method: "POST",
-      body: JSON.stringify({ files: variants }),
-    });
-    const purgeText = await purgeRes.text();
-    let purge: any = {}; try { purge = JSON.parse(purgeText); } catch { purge = {}; }
-    return { attempted: true, ok: purgeRes.ok && purge?.success !== false, status: purgeRes.status, files: variants, detail: purgeText.slice(0, 240) };
+    const variants = urlVariants(cleanUrl);
+    const results: any[] = [];
+    let allOk = true;
+    for (let i = 0; i < Math.max(1, rounds); i++) {
+      // Round A: purge by files (URL variants)
+      const fileRes = await cfFetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`, {
+        method: "POST",
+        body: JSON.stringify({ files: variants }),
+      });
+      const fileText = await fileRes.text();
+      let fileJson: any = {}; try { fileJson = JSON.parse(fileText); } catch { /* */ }
+      const fileOk = fileRes.ok && fileJson?.success !== false;
+      results.push({ round: i + 1, type: "files", status: fileRes.status, ok: fileOk, detail: fileText.slice(0, 200) });
+
+      // Round B: purge by hosts (works on Pro/Business/Ent — falls through harmlessly otherwise)
+      let host = "";
+      try { host = new URL(cleanUrl).hostname; } catch { /* */ }
+      if (host) {
+        const hosts = Array.from(new Set([host, host.startsWith("www.") ? host.slice(4) : `www.${host}`]));
+        const hostRes = await cfFetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`, {
+          method: "POST",
+          body: JSON.stringify({ hosts }),
+        });
+        const hostText = await hostRes.text();
+        let hostJson: any = {}; try { hostJson = JSON.parse(hostText); } catch { /* */ }
+        const hostOk = hostRes.ok && hostJson?.success !== false;
+        results.push({ round: i + 1, type: "hosts", status: hostRes.status, ok: hostOk, detail: hostText.slice(0, 200) });
+        // hosts may not be supported on every plan — don't penalize allOk for that
+      }
+      if (!fileOk) allOk = false;
+      if (i < rounds - 1) await sleep(1500);
+    }
+    return { attempted: true, ok: allOk, files: variants, rounds: results };
   } catch (e) {
     return { attempted: true, ok: false, error: String((e as any)?.message || e) };
   }
+}
+
+// Bypass any intermediate cache by sending unique cookies + headers WordPress treats as logged-out
+async function fetchCleanWithCacheBypass(cleanUrl: string) {
+  const res = await fetch(cleanUrl, {
+    headers: {
+      "User-Agent": "GearupAudit/3.2-canonical-verify",
+      "Cache-Control": "no-cache, no-store, max-age=0",
+      Pragma: "no-cache",
+      "CF-IPCountry": "XX",
+      Cookie: `gutf_bust=${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    },
+  });
+  return { ok: res.ok, status: res.status, html: await res.text().catch(() => ""), cf: res.headers.get("cf-cache-status") || null, age: res.headers.get("age") || null };
 }
 
 function runMarker(runId: string): string {
