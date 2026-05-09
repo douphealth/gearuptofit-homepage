@@ -767,52 +767,19 @@ Deno.serve(async (req) => {
   const restBodyWords = htmlWordCount(verifyContent);
   const restBodyH2 = countTag(verifyContent, "h2");
   const savedPublished = String(verifyBody?.status || updatedPost?.status || "") === "publish";
-  let liveHasContentSlot: boolean | null = null;
-  let liveHasSignals = false;
-  let liveHasRunMarker = false;
-  let liveStatus: number | null = null;
-  let liveBodyWords = 0;
-  let liveBodyH2 = 0;
   let liveUrl = canonicalPublicUrl(String(updatedPost?.link || post?.link || ""));
-  let visualReport: { score: number; checks: Record<string, boolean | number>; issues: string[] } | null = null;
-  if (liveUrl) {
-    for (let attempt = 1; attempt <= 4; attempt++) {
-      try {
-        const liveRes = await fetchLiveHtml(liveUrl, runId, attempt);
-        liveStatus = liveRes.status;
-        if (liveRes.ok) {
-          const liveHtml = liveRes.html;
-          liveHasContentSlot = hasLiveContentSlot(liveHtml);
-          liveHasSignals = containsAppliedSignal(liveHtml);
-          liveHasRunMarker = containsRunMarker(liveHtml, runId);
-          const articleZone = (() => {
-            const idx = liveHtml.search(/<(article|main)\b/i);
-            if (idx < 0) return liveHtml;
-            const tag = (liveHtml.slice(idx).match(/<(article|main)\b/i) || ["", "article"])[1].toLowerCase();
-            return findBalancedElement(liveHtml, tag, idx) || liveHtml;
-          })();
-          const articleClean = stripNonContent(articleZone);
-          liveBodyWords = htmlWordCount(articleClean);
-          liveBodyH2 = countTag(articleClean, "h2");
-          visualReport = visualValidate(articleZone);
-          if (liveHasRunMarker && liveBodyWords >= 600 && liveBodyH2 >= 3) break;
-        }
-      } catch { /* retry below */ }
-      await sleep(900 * attempt);
-    }
-  }
-
-  const liveBodyOk = liveBodyWords >= 600 && liveBodyH2 >= 3;
-  const verification = { rest_has_signals: restHasSignals, rest_has_run_marker: restHasRunMarker, rest_body_word_count: restBodyWords, rest_body_h2_count: restBodyH2, saved_status_publish: savedPublished, live_url: liveUrl, live_status: liveStatus, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals, live_has_run_marker: liveHasRunMarker, live_body_word_count: liveBodyWords, live_body_h2_count: liveBodyH2, live_body_ok: liveBodyOk, run_marker: marker };
-  if (!savedPublished || !restHasSignals || !restHasRunMarker || !liveHasRunMarker || !liveBodyOk) {
-    const reason = !liveBodyOk && liveHasRunMarker
-      ? `Live page renders the run marker but the visible article body is too thin (words=${liveBodyWords}, h2=${liveBodyH2}). Reader will see a near-empty post. Likely cause: WordPress KSES stripped <section> tags, an Elementor/page-builder template overrides post_content, or CDN cache is serving an older render.`
+  const liveCheck = liveUrl ? await verifyLiveVisibility(liveUrl, runId, true, 5) : null;
+  const visualReport = liveCheck?.live_visual_report || null;
+  const verification = { rest_has_signals: restHasSignals, rest_has_run_marker: restHasRunMarker, rest_body_word_count: restBodyWords, rest_body_h2_count: restBodyH2, saved_status_publish: savedPublished, run_marker: marker, ...(liveCheck || { live_url: liveUrl, live_status: null, live_body_word_count: 0, live_body_h2_count: 0, live_body_ok: false, live_has_run_marker: false, live_has_signals: false, live_has_content_slot: null, live_min_word_count: LIVE_MIN_VISIBLE_WORDS, live_min_h2_count: LIVE_MIN_VISIBLE_H2 }) };
+  if (!savedPublished || !restHasSignals || !restHasRunMarker || !verification.live_has_run_marker || !verification.live_body_ok) {
+    const reason = !verification.live_body_ok && verification.live_has_run_marker
+      ? `Live page renders the exact publish run marker but the visible article body is too thin (words=${verification.live_body_word_count}, h2=${verification.live_body_h2_count}; required ≥${LIVE_MIN_VISIBLE_WORDS} words and ≥${LIVE_MIN_VISIBLE_H2} H2). Reader will see a near-empty post.`
       : (liveHasRunMarker ? "WordPress saved the overhaul, but publish status verification failed." : "WordPress accepted the update, but the public live post did not show this exact publish run after cache-busted re-fetch. Treating as NOT published/visible.");
-    await logEvent(postId, `Overhaul not live-verified; saved=${savedPublished} rest_marker=${restHasRunMarker} live_marker=${liveHasRunMarker} body_ok=${liveBodyOk} live_words=${liveBodyWords} live_h2=${liveBodyH2} (${changes.join(", ")})`, false);
+    await logEvent(postId, `Overhaul not live-verified; saved=${savedPublished} rest_marker=${restHasRunMarker} live_marker=${verification.live_has_run_marker} body_ok=${verification.live_body_ok} live_words=${verification.live_body_word_count} live_h2=${verification.live_body_h2_count} source=${verification.live_content_source} (${changes.join(", ")})`, false);
     return jsonRes({ ok: false, post_id: postId, changes, message: reason, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } }, 200);
   }
 
   const visualScore = visualReport?.score ?? null;
-  await logEvent(postId, `Overhauled and public-live verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"}; body=${liveBodyWords}w/${liveBodyH2}h2; ${marker})`, true);
-  return jsonRes({ ok: true, post_id: postId, changes, message: `Applied, published, and verified (${liveBodyWords} words · ${liveBodyH2} H2 sections · visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}`, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
+  await logEvent(postId, `Overhauled and public-live verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"}; body=${verification.live_body_word_count}w/${verification.live_body_h2_count}h2; selected=${verification.live_content_source}; ${marker})`, true);
+  return jsonRes({ ok: true, post_id: postId, changes, message: `Applied, published, and verified (${verification.live_body_word_count} visible words · ${verification.live_body_h2_count} visible H2 sections · visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}`, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
 });
