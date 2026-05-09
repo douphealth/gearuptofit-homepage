@@ -371,6 +371,7 @@ function toCsv(rows: LeakItem[], results: FixResult[] | null): string {
     "post_id", "title", "url",
     "fix_status", "publish_status", "http_code", "completed_at",
     "removed_chars", "chars_delta", "wrapper_tags_removed", "style_tags_added",
+    "verify_status", "verify_verdict", "verified_at",
     "fix_error", "sample",
   ];
   const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
@@ -387,6 +388,9 @@ function toCsv(rows: LeakItem[], results: FixResult[] | null): string {
       r?.diff?.chars_delta ?? "",
       r?.diff?.wrapper_tags_removed ?? "",
       r?.diff?.style_tags_added ?? "",
+      r?.verify ?? "",
+      r?.verify_verdict ?? "",
+      r?.verified_at ?? "",
       r?.error ?? "",
       it.sample ?? "",
     ].map(esc).join(","));
