@@ -1264,11 +1264,30 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
                 <p className="text-xs text-muted-foreground">No high-confidence link opportunities — content already well-linked or no topical matches.</p>
               )}
               {linkApplied && (
-                <div className="text-xs p-2 rounded-md bg-emerald-500/10 border">
-                  <div className="font-medium text-emerald-500">Inserted {linkApplied.applied} link(s)</div>
+                <div className="text-xs p-2 rounded-md bg-emerald-500/10 border space-y-1">
+                  <div className={`font-medium ${linkApplied.applied > 0 ? "text-emerald-500" : "text-amber-500"}`}>
+                    Inserted {linkApplied.applied} link(s){linkApplied.skipped?.length ? ` · ${linkApplied.skipped.length} skipped` : ""}
+                  </div>
+                  {linkApplied.reconciled_stale_markers ? (
+                    <div className="text-amber-500">
+                      Cleaned {linkApplied.reconciled_stale_markers} stale marker(s) from prior overhaul. Click "Apply" again to insert.
+                    </div>
+                  ) : null}
                   {linkApplied.links.map((l, i) => (
-                    <div key={i} className="text-muted-foreground">→ {l.anchor}</div>
+                    <div key={`a-${i}`} className="text-muted-foreground">→ {l.anchor}</div>
                   ))}
+                  {linkApplied.skipped?.length ? (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-muted-foreground">Why {linkApplied.skipped.length} skipped</summary>
+                      <div className="mt-1 space-y-0.5">
+                        {linkApplied.skipped.map((s, i) => (
+                          <div key={`s-${i}`} className="text-muted-foreground">
+                            <Badge variant="outline" className="mr-1">{s.reason}</Badge>{s.anchor}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
                 </div>
               )}
             </CardContent>
