@@ -960,6 +960,14 @@ function BulkCleanupPanel() {
                       <td className="p-2 text-muted-foreground">
                         {res?.diff ? `Δ${res.diff.chars_delta}c · −${res.diff.wrapper_tags_removed}p · +${res.diff.style_tags_added}<style>` : "—"}
                       </td>
+                      <td className="p-2">
+                        {!res?.verify ? <span className="text-muted-foreground">—</span>
+                          : res.verify === "checking" ? <span className="text-muted-foreground">checking…</span>
+                          : res.verify === "clean" ? <span className="text-emerald-500" title={`Verdict: ${res.verify_verdict ?? "clean"}`}>✓ wrapped</span>
+                          : res.verify === "stale_cache" ? <span className="text-amber-500" title="Origin clean, CDN stale">⏳ stale CDN</span>
+                          : res.verify === "leak" ? <span className="text-destructive" title={`Verdict: ${res.verify_verdict ?? "leak"}`}>✗ leak</span>
+                          : <span className="text-amber-500" title={res.verify_error}>? error</span>}
+                      </td>
                       <td className="p-2 text-muted-foreground">{ts || "—"}</td>
                     </tr>
                   );
