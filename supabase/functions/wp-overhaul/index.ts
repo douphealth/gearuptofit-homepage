@@ -160,22 +160,46 @@ Deno.serve(async (req) => {
   if (!user || !pass) return jsonRes({ error: "WP credentials not configured" }, 500);
   const auth = "Basic " + btoa(`${user}:${pass}`);
 
-  // 1. Fetch raw content
-  const getRes = await fetch(`${WP_BASE}/posts/${postId}?context=edit&_fields=id,title,excerpt,content,status`, {
-    headers: { Authorization: auth, "User-Agent": "GearupAudit/3.0" },
-  });
-  if (!getRes.ok) {
-    const t = await getRes.text();
-    return jsonRes({ error: `GET ${getRes.status}: ${t.slice(0, 200)}` }, 502);
+  // 1. Fetch raw content (context=edit). Fallback to context=view if raw is empty
+  // (happens when the app-password user lacks edit_posts cap on this post type).
+  async function fetchPost(ctx: "edit" | "view") {
+    const r = await fetch(`${WP_BASE}/posts/${postId}?context=${ctx}&_fields=id,title,excerpt,content,status`, {
+      headers: { Authorization: auth, "User-Agent": "GearupAudit/3.0" },
+    });
+    return { ok: r.ok, status: r.status, body: r.ok ? await r.json() : await r.text() };
   }
-  const post = await getRes.json();
-  const raw: string =
+  let g = await fetchPost("edit");
+  if (!g.ok) {
+    // Try view context as fallback (e.g. 401/403 on edit)
+    const g2 = await fetchPost("view");
+    if (!g2.ok) return jsonRes({ error: `GET ${g.status}: ${String(g.body).slice(0, 200)}` }, 502);
+    g = g2;
+  }
+  let post: any = g.body;
+  let raw: string =
     (typeof post?.content?.raw === "string" && post.content.raw) ||
     (typeof post?.content?.rendered === "string" && post.content.rendered) ||
     "";
+  // If raw is empty (edit context returned rendered-only blank), try view context which always returns rendered HTML
   if (!raw.trim()) {
-    await logEvent(postId, "Skipped: empty content (raw+rendered both empty)", true);
-    return jsonRes({ ok: true, post_id: postId, changes: ["skipped-empty"], message: "Post has no content to overhaul." });
+    const g2 = await fetchPost("view");
+    if (g2.ok) {
+      post = g2.body;
+      raw =
+        (typeof post?.content?.rendered === "string" && post.content.rendered) ||
+        (typeof post?.content?.raw === "string" && post.content.raw) ||
+        "";
+    }
+  }
+  if (!raw.trim()) {
+    const diag = `status=${post?.status} hasContent=${!!post?.content} keys=${post?.content ? Object.keys(post.content).join(",") : "none"}`;
+    await logEvent(postId, `Skipped: empty content (${diag})`, false);
+    return jsonRes({
+      ok: false,
+      post_id: postId,
+      error: "Empty content from WordPress REST API",
+      detail: `The post returned no content.raw or content.rendered. ${diag}. This usually means the WordPress Application Password user lacks 'edit_posts' capability on this post, or the post is built entirely with a page-builder that stores content outside the standard 'post_content' column (Elementor, Divi, Bricks, etc.).`,
+    }, 422);
   }
 
   // 2. Visual transforms
