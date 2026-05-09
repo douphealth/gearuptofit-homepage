@@ -316,26 +316,70 @@ function detectCwvIssues(html: string): { issues: Issue[]; cwv: any } {
     });
   }
 
-  // Compose CWV sub-score (0-100)
+  // ── Layout-overflow → CLS/LCP impact attribution ───────────────────────
+  const oversizedImgs = imgs.filter((i) => Number((i.match(/\swidth=["']?(\d{3,})/) || [])[1] || 0) > 800).length;
+  const tableUnwrapped = (() => {
+    const total = countMatches(html, /<table\b/gi);
+    const wrapped = countMatches(html, /<(?:div|figure)[^>]*class=["'][^"']*(?:table-wrapper|comparison-table-wrapper|wp-block-table|overflow-x-auto|table-responsive|gutf-table-wrap)[^"']*["'][^>]*>\s*<table/gi);
+    return Math.max(0, total - wrapped);
+  })();
+  const fixedIframes = iframes.filter((i) => /\bwidth=["']?\d{3,}/.test(i) && !/\bstyle=["'][^"']*max-width/i.test(i)).length;
+  const layoutOverflowCount = oversizedImgs + tableUnwrapped + fixedIframes;
+  if (layoutOverflowCount > 0) {
+    issues.push({
+      severity: layoutOverflowCount > 2 ? "high" : "medium",
+      category: "visual", code: "cwv-overflow-impact",
+      message: `${layoutOverflowCount} cut-off/overflow element(s) likely to inflate CLS and shift LCP candidates`,
+    });
+  }
+
+  // Compose CWV sub-score (0-100) — now also penalised for overflow elements
   const cwvWeights: Record<Sev, number> = { critical: 25, high: 15, medium: 8, polish: 3 };
   let cwvPenalty = 0;
   for (const i of issues) cwvPenalty += cwvWeights[i.severity] || 0;
   const cwvScore = HARD(100 - cwvPenalty);
 
+  // Sub-pillar scores — used by the UI to sort by worst LCP / worst CLS.
+  const lcpPenalty =
+    (firstImg && !hasFetchPriority ? 15 : 0) +
+    (firstImg && heroLazy ? 20 : 0) +
+    (firstImg && /\.(jpg|jpeg|png)["'?\s]/i.test(firstImg) ? 8 : 0) +
+    (eagerCount > 2 ? 8 : 0) +
+    (oversizedImgs * 4);
+  const clsPenalty =
+    imgsNoDims.length * 4 +
+    iframesNoDims.length * 4 +
+    adlikeIframes.length * 6 +
+    (/@font-face/i.test(html) ? 5 : 0) +
+    tableUnwrapped * 6 +
+    fixedIframes * 6 +
+    oversizedImgs * 3;
+  const inpPenalty =
+    heavyInline.length * 12 +
+    blockingScripts.length * 10 +
+    (externalScripts.length > 6 ? 8 : 0) +
+    (domNodes > 1500 ? 8 : 0);
+
   return {
     issues,
     cwv: {
       score: cwvScore,
+      lcpScore: HARD(100 - lcpPenalty),
+      clsScore: HARD(100 - clsPenalty),
+      inpScore: HARD(100 - inpPenalty),
       lcp: {
         heroFetchPriority: hasFetchPriority,
         heroLazy,
         heroFormat: /\.(webp|avif)["'?\s]/i.test(firstImg) ? "modern" : (firstImg ? "legacy" : "none"),
         eagerAboveFold: eagerCount,
+        oversizedImages: oversizedImgs,
       },
       cls: {
         imagesMissingDims: imgsNoDims.length,
         iframesMissingDims: iframesNoDims.length,
         adsWithoutReserve: adlikeIframes.length,
+        unwrappedTables: tableUnwrapped,
+        fixedWidthIframes: fixedIframes,
       },
       inp: {
         inlineScripts: inlineScripts.length,
@@ -343,6 +387,7 @@ function detectCwvIssues(html: string): { issues: Issue[]; cwv: any } {
         blockingScripts: blockingScripts.length,
         externalScripts: externalScripts.length,
       },
+      layoutOverflowCount,
       domNodes,
     },
   };
