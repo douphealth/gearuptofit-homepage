@@ -315,7 +315,7 @@ async function verifyLiveVisibility(url: string, runId: string, exactRunRequired
     try {
       const liveRes = await fetchLiveHtml(url, runId || `existing_${crypto.randomUUID()}`, attempt);
       const analysis = liveRes.ok ? analyzeLiveVisibility(liveRes.html, runId, exactRunRequired) : {};
-      last = { ...last, ...analysis, live_url: url, live_fetched_url: liveRes.fetched_url, live_status: liveRes.status, live_attempts: attempt };
+      last = { ...last, ...analysis, live_url: url, live_fetched_url: liveRes.fetched_url, live_status: liveRes.status, live_attempts: attempt, live_visual_report: liveRes.ok ? visualValidate(liveRes.html) : null };
       const exactOk = exactRunRequired ? last.live_has_run_marker : true;
       if (liveRes.ok && exactOk && last.live_body_ok) break;
     } catch (e) {
@@ -516,6 +516,17 @@ function injectOrReplaceSections(html: string, sectionsHtml: string): { html: st
   const cssIdx = html.indexOf("</style>");
   if (cssIdx >= 0) return { html: html.slice(0, cssIdx + 8) + block + html.slice(cssIdx + 8), added: true, replaced: false };
   return { html: block + html, added: true, replaced: false };
+}
+
+function buildStandaloneOverhaulHtml(enriched: Record<string, any>): string {
+  let html = `${RESPONSIVE_CSS}\n<div class="gutf-article gutf-generated-overhaul gutf-live-repair">\n`;
+  if (enriched.introHtml) html += `<!--gutf:intro-->${ksesSafe(enriched.introHtml)}<!--/gutf:intro-->\n`;
+  if (enriched.sectionsHtml) html += `<!--gutf:sections-->${ksesSafe(enriched.sectionsHtml)}<!--/gutf:sections-->\n`;
+  if (enriched.conclusionHtml) html += `<!--gutf:bottom-line-->${ksesSafe(enriched.conclusionHtml)}<!--/gutf:bottom-line-->\n`;
+  if (enriched.faqHtml) html += `<!--gutf:faq-->${ksesSafe(enriched.faqHtml)}<!--/gutf:faq-->\n`;
+  html += `</div>`;
+  const ld = injectJsonLd(html, enriched.jsonLd);
+  return ld.html;
 }
 
 function visualValidate(liveHtml: string): { score: number; checks: Record<string, boolean | number>; issues: string[] } {
