@@ -1071,7 +1071,7 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
   const [fixes, setFixes] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [pushing, setPushing] = useState(false);
-  const [overhaulResult, setOverhaulResult] = useState<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any; visual?: any } | null>(null);
+  const [overhaulResult, setOverhaulResult] = useState<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any; visual?: any; body_word_count?: number; body_h2_count?: number } | null>(null);
   const [linkSugs, setLinkSugs] = useState<any[] | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkApplied, setLinkApplied] = useState<{ applied: number; links: any[] } | null>(null);
@@ -1094,8 +1094,8 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
     if (!confirm(`FULL OVERHAUL — applies all changes to LIVE post ${post.post_id}:\n\n• Wraps tables/iframes for mobile responsiveness\n• Strips fixed pixel widths\n• Adds lazy-loading to images\n• Injects intro, FAQ section, conclusion (idempotent — safe to re-run)\n• Adds JSON-LD schema\n• Adds responsive CSS guard\n• Updates meta title + description\n\nProceed?`)) return;
     setPushing(true);
     try {
-      const r = await callAudit<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any; visual?: any }>("wp-overhaul", { post_id: post.post_id, fixes });
-      setOverhaulResult({ ok: !!r.ok, changes: r.changes || [], message: r.message || "", content_source: r.content_source, verification: r.verification, visual: r.visual });
+      const r = await callAudit<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any; visual?: any; body_word_count?: number; body_h2_count?: number }>("wp-overhaul", { post_id: post.post_id, fixes });
+      setOverhaulResult({ ok: !!r.ok, changes: r.changes || [], message: r.message || "", content_source: r.content_source, verification: r.verification, visual: r.visual, body_word_count: r.body_word_count, body_h2_count: r.body_h2_count });
       toast({ title: r.ok ? `Public live post verified ${post.post_id}` : "Not visible on live post", description: r.message, variant: r.ok ? "default" : "destructive" });
     } catch (e: any) { toast({ title: "Overhaul failed", description: e.message, variant: "destructive" }); }
     setPushing(false);
