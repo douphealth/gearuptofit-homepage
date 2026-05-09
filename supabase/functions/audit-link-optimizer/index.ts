@@ -150,38 +150,50 @@ function buildCandidatePhrases(target: { title: string; slug: string }): string[
   return Array.from(phrases);
 }
 
-function findBestInsertion(
-  html: string, phrases: string[],
-): { anchor: string; offset: number; matchedLen: number; context: string } | null {
-  let best: { anchor: string; offset: number; matchedLen: number; context: string } | null = null;
+type SafeSpan = { start: number; end: number; text: string };
+function precomputeSafeSpans(html: string): SafeSpan[] {
+  const out: SafeSpan[] = [];
   for (const span of safeTextSpans(html)) {
     const text = html.slice(span.start, span.end);
     if (text.length < 8) continue;
-    for (const phrase of phrases) {
-      const re = new RegExp(`\\b${escapeRegex(phrase)}\\b`, "i");
-      const m = re.exec(text);
+    out.push({ start: span.start, end: span.end, text });
+  }
+  return out;
+}
+
+function findBestInsertion(
+  spans: SafeSpan[], phrases: string[],
+): { anchor: string; offset: number; matchedLen: number; context: string } | null {
+  let best: { anchor: string; offset: number; matchedLen: number; context: string } | null = null;
+  // Sort phrases longest-first; bail as soon as we find a match (longest wins).
+  const sorted = phrases.slice().sort((a, b) => b.length - a.length);
+  for (const phrase of sorted) {
+    if (best && phrase.length <= best.matchedLen) break;
+    const re = new RegExp(`\\b${escapeRegex(phrase)}\\b`, "i");
+    for (const span of spans) {
+      const m = re.exec(span.text);
       if (!m) continue;
-      const matchedLen = phrase.length;
-      if (!best || matchedLen > best.matchedLen) {
-        const absOffset = span.start + m.index;
-        const ctxStart = Math.max(0, m.index - 60);
-        const ctxEnd = Math.min(text.length, m.index + phrase.length + 60);
-        best = {
-          anchor: text.slice(m.index, m.index + phrase.length),
-          offset: absOffset,
-          matchedLen,
-          context: ("…" + text.slice(ctxStart, ctxEnd) + "…").replace(/\s+/g, " "),
-        };
-      }
+      const absOffset = span.start + m.index;
+      const ctxStart = Math.max(0, m.index - 60);
+      const ctxEnd = Math.min(span.text.length, m.index + phrase.length + 60);
+      best = {
+        anchor: span.text.slice(m.index, m.index + phrase.length),
+        offset: absOffset,
+        matchedLen: phrase.length,
+        context: ("…" + span.text.slice(ctxStart, ctxEnd) + "…").replace(/\s+/g, " "),
+      };
+      break;
     }
   }
   return best;
 }
 
+
 async function loadCorpus(supabase: any, excludeId: number) {
+  // Drop `data` (huge) — we only need title/slug/link/modified_at for scoring.
   const { data } = await supabase
     .from("wp_posts_cache")
-    .select("post_id, title, slug, link, modified_at, data")
+    .select("post_id, title, slug, link, modified_at")
     .neq("post_id", excludeId)
     .limit(1500);
   return data || [];
@@ -249,6 +261,7 @@ async function suggestForPost(supabase: any, sourceId: number, max = 6): Promise
   const linked = existingLinks(html);
 
   const corpus = await loadCorpus(supabase, sourceId);
+  const safeSpans = precomputeSafeSpans(html); // compute regex-heavy spans ONCE
 
   // Score each candidate
   const scored: Suggestion[] = [];
@@ -264,7 +277,7 @@ async function suggestForPost(supabase: any, sourceId: number, max = 6): Promise
 
     const phrases = buildCandidatePhrases({ title: targetTitle, slug: t.slug || "" });
     if (!phrases.length) continue;
-    const hit = findBestInsertion(html, phrases);
+    const hit = findBestInsertion(safeSpans, phrases);
     if (!hit) continue;
 
     // Freshness boost
