@@ -219,10 +219,15 @@ async function purgeCloudflareUrl(url: string) {
   const token = Deno.env.get("CLOUDFLARE_API_TOKEN");
   const cleanUrl = cleanPublicUrl(url);
   if (!token || !cleanUrl) return { attempted: false, ok: false, reason: token ? "missing_url" : "missing_token" };
+  async function cfFetch(target: string, init: RequestInit = {}) {
+    const bearerHeaders = { ...(init.headers || {}), Authorization: `Bearer ${token}`, "Content-Type": "application/json" } as Record<string, string>;
+    const bearer = await fetch(target, { ...init, headers: bearerHeaders });
+    if (bearer.status !== 403 && bearer.status !== 401) return bearer;
+    const keyHeaders = { ...(init.headers || {}), "X-Auth-Email": "Papalexios@gmail.com", "X-Auth-Key": token, "Content-Type": "application/json" } as Record<string, string>;
+    return await fetch(target, { ...init, headers: keyHeaders });
+  }
   try {
-    const zonesRes = await fetch("https://api.cloudflare.com/client/v4/zones?name=gearuptofit.com", {
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    });
+    const zonesRes = await cfFetch("https://api.cloudflare.com/client/v4/zones?name=gearuptofit.com");
     const zonesText = await zonesRes.text();
     let zones: any = {}; try { zones = JSON.parse(zonesText); } catch { zones = {}; }
     const zoneId = zones?.result?.[0]?.id;
@@ -232,9 +237,8 @@ async function purgeCloudflareUrl(url: string) {
       cleanUrl,
       cleanUrl.endsWith("/") ? cleanUrl.slice(0, -1) : `${cleanUrl}/`,
     ]));
-    const purgeRes = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`, {
+    const purgeRes = await cfFetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ files: variants }),
     });
     const purgeText = await purgeRes.text();
