@@ -957,7 +957,10 @@ Deno.serve(async (req) => {
   if (!postId) return jsonRes({ error: "post_id required" }, 400);
   const fixes = body.fixes || {};
   const dryRun = !!body.dry_run;
-  const premiumQuality = body.premium_quality !== false; // default ON
+  // Default OFF: the premium AI rewrite can exceed Edge runtime memory when the
+  // model returns a large article payload. The safe path applies caller fixes
+  // and local publishable fallbacks without loading a huge AI response.
+  const premiumQuality = body.premium_quality === true;
 
   const user = Deno.env.get("WP_USERNAME");
   const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
@@ -1026,7 +1029,8 @@ Deno.serve(async (req) => {
   }
 
 
-  // 1b. Premium AI generation (SOTA, semantic, outranking content) — merged with caller fixes.
+  // 1b. Premium AI generation only when explicitly requested; otherwise use
+  // caller fixes + deterministic fallback to stay inside Edge memory limits.
   const enrichedRaw = premiumQuality ? await generatePremiumContent(post, raw, fixes) : (fixes || {});
   // KSES sanitization: strip <section>/<article> from any AI/caller HTML so the body
   // actually survives the WordPress REST update (Application Passwords lack unfiltered_html).
