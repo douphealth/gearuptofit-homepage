@@ -1096,12 +1096,13 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
     return next;
   };
 
-  const fullOverhaul = async () => {
+  const fullOverhaul = async (premium = false) => {
     if (!fixes) { toast({ title: "Generate AI fixes first" }); return; }
-    if (!confirm(`FULL OVERHAUL — applies all changes to LIVE post ${post.post_id}:\n\n• Wraps tables/iframes for mobile responsiveness\n• Strips fixed pixel widths\n• Adds lazy-loading to images\n• Injects intro, FAQ section, conclusion (idempotent — safe to re-run)\n• Adds JSON-LD schema\n• Adds responsive CSS guard\n• Updates meta title + description\n\nProceed?`)) return;
+    const label = premium ? "FULL OVERHAUL (PREMIUM AI REWRITE)" : "FULL OVERHAUL";
+    if (!confirm(`${label} — applies all changes to LIVE post ${post.post_id}:\n\n• Wraps tables/iframes for mobile responsiveness\n• Strips fixed pixel widths\n• Adds lazy-loading to images\n• Injects intro, FAQ section, conclusion (idempotent — safe to re-run)\n• Adds JSON-LD schema\n• Adds responsive CSS guard\n• Updates meta title + description${premium ? "\n• AI-rewrites body copy for higher quality (only on small posts)" : ""}\n\nProceed?`)) return;
     setPushing(true);
     try {
-      const r = await callAudit<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any; visual?: any; body_word_count?: number; body_h2_count?: number }>("wp-overhaul", { post_id: post.post_id, fixes: compactFixesForOverhaul(fixes) });
+      const r = await callAudit<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any; visual?: any; body_word_count?: number; body_h2_count?: number }>("wp-overhaul", { post_id: post.post_id, fixes: compactFixesForOverhaul(fixes), premium_quality: premium });
       setOverhaulResult({ ok: !!r.ok, changes: r.changes || [], message: r.message || "", content_source: r.content_source, verification: r.verification, visual: r.visual, body_word_count: r.body_word_count, body_h2_count: r.body_h2_count });
       toast({ title: r.ok ? `Public live post verified ${post.post_id}` : "Not visible on live post", description: r.message, variant: r.ok ? "default" : "destructive" });
     } catch (e: any) { toast({ title: "Overhaul failed", description: e.message, variant: "destructive" }); }
@@ -1341,10 +1342,17 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
               )}
               {fixes.jsonLd && <FixBlock label="JSON-LD schema" value={JSON.stringify(fixes.jsonLd, null, 2)} mono />}
 
-              <Button onClick={fullOverhaul} disabled={pushing} className="w-full" variant="destructive">
-                {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
-                FULL OVERHAUL — apply all to live post
-              </Button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <Button onClick={() => fullOverhaul(false)} disabled={pushing} className="w-full" variant="destructive">
+                  {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
+                  FULL OVERHAUL (fast)
+                </Button>
+                <Button onClick={() => fullOverhaul(true)} disabled={pushing} className="w-full" variant="default">
+                  {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
+                  PREMIUM AI rewrite
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground -mt-1">Premium rewrites body copy with AI for higher quality. Only runs on small posts (≤80KB raw) to stay within memory limits — falls back to fast mode otherwise.</p>
               {overhaulResult && (
                 <div className={`text-xs p-3 border rounded-md ${overhaulResult.ok ? "bg-emerald-500/10" : "bg-destructive/10"}`}>
                   <div className={`font-medium mb-1 ${overhaulResult.ok ? "text-emerald-500" : "text-destructive"}`}>
