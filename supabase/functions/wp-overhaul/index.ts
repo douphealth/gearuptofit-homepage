@@ -606,6 +606,38 @@ function countTag(html: string, tag: string): number {
   return (String(html || "").match(new RegExp(`<${tag}\\b`, "gi")) || []).length;
 }
 
+// Pull a topical short-list of internal-link candidates from the cached WP corpus,
+// scored by token overlap against the source post's title/slug/keyword.
+async function fetchInternalLinkCandidates(post: any, fixes: Record<string, any>, max = 28): Promise<Array<{ url: string; title: string }>> {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) return [];
+  try {
+    const sourceTitle = stripTags(post?.title?.raw || post?.title?.rendered || "");
+    const seedText = `${sourceTitle} ${stripTags(fixes?.primaryKeyword || "")} ${(fixes?.semanticKeywords || []).join(" ")}`.toLowerCase();
+    const STOP = new Set(["the","a","an","and","or","of","for","to","in","on","at","by","with","is","are","be","this","that","you","your","our","we","best","top","guide","review","reviews","how","why","what","when","2024","2025","2026"]);
+    const seedTokens = new Set((seedText.match(/[a-z][a-z0-9'\-]{2,}/g) || []).filter((w) => !STOP.has(w)));
+    const r = await fetch(`${url}/rest/v1/wp_posts_cache?select=post_id,title,slug,link&post_id=neq.${post?.id || 0}&limit=1500`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    });
+    if (!r.ok) return [];
+    const rows: any[] = await r.json().catch(() => []);
+    const scored = rows.map((row) => {
+      const t = stripTags(row?.title || "").replace(/&[a-z#0-9]+;/gi, " ").toLowerCase();
+      const slugWords = String(row?.slug || "").replace(/-/g, " ");
+      const tokens = (`${t} ${slugWords}`.match(/[a-z][a-z0-9'\-]{2,}/g) || []).filter((w) => !STOP.has(w));
+      let overlap = 0;
+      for (const tok of tokens) if (seedTokens.has(tok)) overlap++;
+      const link = String(row?.link || "").replace(/^https?:\/\/origin\.gearuptofit\.com/i, APEX);
+      return { url: link, title: stripTags(row?.title || "").replace(/&#8217;/g, "'").replace(/&amp;/g, "&"), score: overlap };
+    }).filter((x) => x.url && x.title && x.score > 0);
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, max).map(({ url, title }) => ({ url, title }));
+  } catch {
+    return [];
+  }
+}
+
 async function generatePremiumContent(post: any, existingRaw: string, providedFixes: Record<string, any>): Promise<Record<string, any>> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) return providedFixes || {};
@@ -615,49 +647,94 @@ async function generatePremiumContent(post: any, existingRaw: string, providedFi
   const sourceText = stripTags(existingRaw).slice(0, 8000);
 
   // Strict body requirements — anything less = "empty looking" post.
-  const MIN_BODY_WORDS = 1200;
-  const MIN_BODY_H2 = 4;
+  const MIN_BODY_WORDS = 1500;
+  const MIN_BODY_H2 = 5;
+  const MIN_INTERNAL_LINKS = 6;
 
-  const sys = `You are a world-class SEO editor and copywriter for gearuptofit.com (fitness, training, gear, nutrition).
-Your job: produce a #1-ranking, EEAT-grade, semantically rich, FULL-LENGTH blog post body.
+  const candidates = await fetchInternalLinkCandidates(post, providedFixes || {}, 30);
+  const linkList = candidates.length
+    ? candidates.map((c, i) => `${i + 1}. ${c.title} — ${c.url}`).join("\n")
+    : "(no internal candidates available — skip internal link mandate, use only the natural body)";
 
-CRITICAL CONTENT REQUIREMENTS — non-negotiable:
-- sectionsHtml MUST contain at least ${MIN_BODY_H2} <div class="gutf-section"> blocks, each with one <h2> headline and 2-5 well-developed <p> paragraphs (plus optional <h3>, <ul>/<ol>, <table class="gutf-comparison">).
-- DO NOT use <section>, <article>, <header>, <footer>, <aside> — WordPress KSES sanitizer strips them. Use <div class="gutf-section"> instead.
-- Total visible prose across sectionsHtml MUST be at least ${MIN_BODY_WORDS} words.
-- Cover the topic exhaustively — methodology, science, mistakes, programming, examples, comparisons, FAQ-adjacent depth.
-- Integrate semanticKeywords and entities naturally throughout the body.
-- No filler, no AI disclaimers, no "in this article we will...". Confident expert voice.
+  const sys = `You are the principal editor of gearuptofit.com — an enterprise-grade SEO/GEO/AEO/AIO content engineer with the precision of a sports-science researcher and the polish of a flagship magazine writer. Your output ranks #1 in Google, gets cited by ChatGPT/Perplexity/Gemini answer engines, and converts readers.
 
-Output STRICT JSON ONLY (no markdown fences). Schema:
+NON-NEGOTIABLE QUALITY BAR (every output must satisfy ALL of these):
+
+A. SEMANTIC SEO + GEO/AEO/AIO
+- Weave the primary keyword into: metaTitle (front-loaded), metaDescription, H1 (post title context), introHtml first sentence, at least 2 <h2> headings, and naturally 6–10 times across the body (no stuffing).
+- Distribute 12–20 LSI/semantic keywords and 8–15 named entities (people, brands, methodologies, studies, scientific terms, geographic markers) NATURALLY throughout the body. Each entity should appear at least once in flowing prose.
+- Open EVERY <h2> section with a 1–2 sentence direct, quotable answer (AEO/answer-engine snippet pattern), then expand with depth.
+- Use comparison tables (<table class="gutf-comparison">) for any "vs", "best", or specs discussion.
+- Use bulleted lists for steps, criteria, mistakes, takeaways — answer-engine friendly.
+
+B. E-E-A-T + ORIGINALITY
+- Confident expert voice: cite real research patterns ("a 2022 meta-analysis in Sports Medicine found…"), real protocols, real numbers (heart-rate zones, %1RM, g/kg/day, mL/kg/min). Never invent fake citations with URLs — describe findings generically when uncertain.
+- Include practical examples, sample workouts/macro splits/gear specs, and at least one numbered "How to" or step list.
+- No fluff openers ("In today's fast-paced world…"), no AI disclaimers, no hedging.
+
+C. GORGEOUS HTML COMPONENTS — MANDATORY (use these exact CSS classes; they are pre-styled):
+- One <div class="gutf-key-takeaways"><ul><li>...</li> × 4–6</ul></div> immediately after the intro.
+- One <div class="gutf-toc"><h3>What's inside</h3><ol><li><a href="#anchor">Section name</a></li>...</ol></div> after the takeaways. Match #anchor to id="anchor" attributes you add on the matching <h2>.
+- 2–3 <div class="gutf-callout tip|warning|expert"><strong>Pro tip|Watch out|Expert insight</strong><p>...</p></div> distributed across sections.
+- At least 1 <blockquote class="gutf-pullquote">"...quotable insight..."<cite>— Source/role</cite></blockquote>.
+- At least 1 <div class="gutf-stats"><div class="gutf-stat"><span class="num">42%</span><span class="lbl">label</span></div>...</div> with 3–4 stats.
+- Where relevant: <div class="gutf-proscons"><div class="pros"><h4>Pros</h4><ul>…</ul></div><div class="cons"><h4>Cons</h4><ul>…</ul></div></div>.
+- Where relevant: a <table class="gutf-comparison"><thead><tr><th>...</th></tr></thead><tbody>...</tbody></table> wrapped in nothing — the system will wrap it.
+- After the FAQ, include one <div class="gutf-related"><h3>Continue reading</h3><ul><li><a href="...">…</a></li>×4–6</ul></div> using INTERNAL link candidates only.
+
+D. INTERNAL LINKING (TOPICAL AUTHORITY ENGINE)
+You MUST insert AT LEAST ${MIN_INTERNAL_LINKS} contextual internal links across sectionsHtml + faqHtml + the .gutf-related block, drawing exclusively from this candidate list (use the EXACT URLs):
+
+${linkList}
+
+Rules:
+- Anchor text MUST be descriptive, contextual, and keyword-rich (NEVER "click here", "read more", "this article"). Use 3–7 word natural-language phrases that match the target page topic.
+- Place links inside <p> body prose where the topic genuinely overlaps. Do NOT link inside <h2>/<h3>.
+- Each target URL appears at most ONCE in the body, plus optionally once more in the .gutf-related block.
+- All hrefs MUST point to https://gearuptofit.com/... (never origin.gearuptofit.com).
+
+E. WORDPRESS-SAFETY (KSES sanitizer)
+- Do NOT use <section>, <article>, <header>, <footer>, <aside>, <script>, <style>, <iframe>. Use <div class="..."> instead.
+- No inline width/height in pixels. No data-* attributes other than data-gutf-*.
+
+F. STRUCTURAL MINIMUMS
+- sectionsHtml: ${MIN_BODY_H2}+ <div class="gutf-section"> blocks, each with one <h2 id="..."> + 2–5 <p> + optional <h3>/<ul>/<table>. Total visible prose ≥ ${MIN_BODY_WORDS} words.
+- introHtml: 2 <p>, 70–130 words, primary keyword in first sentence, hook + benefit promise.
+- faqHtml: <div class="gutf-faq"><h2>Frequently Asked Questions</h2> 6–8 <div class="gutf-faq-item"><h3>Question</h3><p>40–80 word answer</p></div></div>.
+- conclusionHtml: <div class="gutf-bottom-line"><h2>Bottom Line</h2><p>80–140 word definitive recap with primary keyword and one CTA</p></div>.
+- jsonLd: schema.org @graph with Article, FAQPage, BreadcrumbList, and a "mentions" array of {"@type":"Thing","name":entity} for the entities list (this powers Knowledge Graph + AI citations).
+
+OUTPUT STRICT JSON ONLY (no markdown fences). Schema:
 {
-  "metaTitle": string (<=60 chars, primary keyword first),
-  "metaDescription": string (<=158 chars, primary keyword, compelling),
+  "metaTitle": string (<=60 chars, primary keyword first, year if evergreen),
+  "metaDescription": string (<=158 chars, primary keyword + benefit + curiosity),
   "primaryKeyword": string,
-  "semanticKeywords": string[] (12-20 LSI/related terms),
-  "entities": string[] (8-15 named entities),
-  "introHtml": string (1 punchy <p> with primary keyword in first sentence + 1 <p> stating user benefit; 60-110 words),
-  "sectionsHtml": string (the FULL article body — 5-8 <div class="gutf-section"> blocks meeting the requirements above),
-  "faqHtml": string (<div class="gutf-faq"><h2>Frequently Asked Questions</h2> 5-7 <div class="gutf-faq-item"><h3>Q</h3><p>A</p></div></div>),
-  "conclusionHtml": string (<div class="gutf-bottom-line"><h2>Bottom Line</h2><p>...</p></div>, 70-120 words),
-  "jsonLd": object (schema.org Article + FAQPage @graph)
-}
-- HTML must be valid, semantic, mobile-friendly, NO inline width/height pixel styles, NO <script>, NO <style>, NO <section>/<article>/<header>/<footer>/<aside>.`;
+  "semanticKeywords": string[12-20],
+  "entities": string[8-15],
+  "introHtml": string,
+  "sectionsHtml": string,
+  "faqHtml": string,
+  "conclusionHtml": string,
+  "jsonLd": object
+}`;
 
   const usr = `TITLE: ${title}
 URL: ${link}
 EXCERPT: ${excerpt}
 
-EXISTING CONTENT (may be empty or thin — rewrite/expand to be the best on the web):
+EXISTING CONTENT (rewrite/expand into the definitive guide on the web — keep useful facts, discard fluff):
 ${sourceText}
 
-Return the JSON now. Remember: sectionsHtml must be the full ${MIN_BODY_WORDS}+ word body with ${MIN_BODY_H2}+ <h2> sections.`;
+Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible words, ${MIN_BODY_H2}+ <h2>, ${MIN_INTERNAL_LINKS}+ internal links from the provided candidate list, all required gorgeous components present.`;
 
   let lastAi: Record<string, any> = {};
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
+      const prevWords = htmlWordCount(lastAi.sectionsHtml || "");
+      const prevH2 = countTag(lastAi.sectionsHtml || "", "h2");
+      const prevLinks = ((lastAi.sectionsHtml || "") + (lastAi.faqHtml || "")).match(/<a\b[^>]*href=["']https:\/\/gearuptofit\.com/gi)?.length || 0;
       const reinforcement = attempt === 1 ? "" :
-        `\n\nPREVIOUS ATTEMPT FAILED VALIDATION: sectionsHtml had ${htmlWordCount(lastAi.sectionsHtml || "")} words and ${countTag(lastAi.sectionsHtml || "", "h2")} <h2> sections. You MUST return a sectionsHtml field with at least ${MIN_BODY_H2} <h2> sections and ${MIN_BODY_WORDS}+ words of real prose. This is your retry attempt ${attempt}/3.`;
+        `\n\nPREVIOUS ATTEMPT FAILED VALIDATION: words=${prevWords} (need ${MIN_BODY_WORDS}+), h2=${prevH2} (need ${MIN_BODY_H2}+), internal_links=${prevLinks} (need ${MIN_INTERNAL_LINKS}+). FIX ALL THREE. Retry ${attempt}/3.`;
       const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -667,7 +744,7 @@ Return the JSON now. Remember: sectionsHtml must be the full ${MIN_BODY_WORDS}+ 
             { role: "system", content: sys },
             { role: "user", content: usr + reinforcement },
           ],
-          max_tokens: 16000,
+          max_tokens: 20000,
           response_format: { type: "json_object" },
         }),
       });
@@ -681,16 +758,16 @@ Return the JSON now. Remember: sectionsHtml must be the full ${MIN_BODY_WORDS}+ 
       lastAi = ai;
       const wc = htmlWordCount(ai.sectionsHtml || "");
       const h2c = countTag(ai.sectionsHtml || "", "h2");
-      console.log(`AI attempt ${attempt}: sections words=${wc}, h2=${h2c}`);
-      if (wc >= MIN_BODY_WORDS && h2c >= MIN_BODY_H2) {
-        return { ...ai, ...(providedFixes || {}) };
+      const lc = ((ai.sectionsHtml || "") + (ai.faqHtml || "")).match(/<a\b[^>]*href=["']https:\/\/gearuptofit\.com/gi)?.length || 0;
+      console.log(`AI attempt ${attempt}: words=${wc}, h2=${h2c}, internal_links=${lc}`);
+      if (wc >= MIN_BODY_WORDS && h2c >= MIN_BODY_H2 && lc >= Math.min(MIN_INTERNAL_LINKS, candidates.length || MIN_INTERNAL_LINKS)) {
+        return { ...ai, _internalLinkCandidates: candidates, ...(providedFixes || {}) };
       }
     } catch (e) {
       console.error("AI gen exception", attempt, e);
     }
   }
-  // Return whatever we got; downstream verification will reject if body is empty.
-  return { ...lastAi, ...(providedFixes || {}) };
+  return { ...lastAi, _internalLinkCandidates: candidates, ...(providedFixes || {}) };
 }
 
 // WordPress KSES strips <section>, <article>, <header>, <footer>, <aside> for users
