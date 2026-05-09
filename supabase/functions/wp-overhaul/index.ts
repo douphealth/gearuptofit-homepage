@@ -1049,6 +1049,9 @@ Deno.serve(async (req) => {
     (typeof post?.content?.rendered === "string" && post.content.rendered) ||
     "";
   const originalRaw = raw.length > MAX_RAW_TRANSFORM_CHARS ? "" : raw;
+  // Only allow premium AI rewrite when raw is small enough to fit in worker memory.
+  const PREMIUM_RAW_BUDGET = 80_000;
+  if (premiumRequested && raw.length > 0 && raw.length <= PREMIUM_RAW_BUDGET) premiumQuality = true;
   let contentSource = raw.trim() ? (typeof post?.content?.raw === "string" && post.content.raw ? "rest_raw" : "rest_rendered") : "empty";
   let publicPageHtml = "";
   // If raw is empty (edit context returned rendered-only blank), try view context which always returns rendered HTML
