@@ -375,24 +375,48 @@ function BulkCleanupPanel() {
   const [targetBusy, setTargetBusy] = useState(false);
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [verifyResult, setVerifyResult] = useState<Verdict | null>(null);
+  const [autoPublish, setAutoPublish] = useState(true);
+
+  // Adaptive scan: starts at 50/page, halves to 10 on WORKER_RESOURCE_LIMIT,
+  // ramps back +10 every successful page up to 100. Keeps throughput high
+  // without breaking on the rare giant-content post that blew the 150MB cap.
+  const isResourceLimit = (msg: string) =>
+    /WORKER_RESOURCE_LIMIT|546|compute resources|memory/i.test(msg || "");
 
   const scan = async () => {
     setScanning(true); setResults(null); setItems([]);
+    const MIN = 10, MAX = 100, RAMP = 10;
+    let perPage = 50;
     try {
       const all: LeakItem[] = [];
       let page = 1;
       let totalPages = 1;
-      while (page <= 100) {
-        const r = await callAudit<{ count: number; affected: LeakItem[]; done: boolean; totalPages: number; page: number }>(
-          "wp-bulk-cleanup",
-          { mode: "scan", page },
-        );
-        totalPages = r.totalPages || totalPages;
-        all.push(...r.affected);
-        setItems([...all]);
-        setStatus(`Scanned page ${page}/${totalPages} · ${all.length} affected`);
-        if (r.done) break;
-        page++;
+      while (page <= 400) {
+        let attempt = 0;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          try {
+            const r = await callAudit<{ count: number; affected: LeakItem[]; done: boolean; totalPages: number; page: number; perPage: number }>(
+              "wp-bulk-cleanup",
+              { mode: "scan", page, perPage },
+            );
+            totalPages = r.totalPages || totalPages;
+            all.push(...r.affected);
+            setItems([...all]);
+            setStatus(`Scanned page ${page}/${totalPages} · ${all.length} affected · ${perPage}/page`);
+            if (perPage < MAX) perPage = Math.min(MAX, perPage + RAMP);
+            if (r.done) { page = totalPages + 1; break; }
+            page++; break;
+          } catch (e: any) {
+            if (isResourceLimit(e?.message) && perPage > MIN && attempt < 4) {
+              perPage = Math.max(MIN, Math.floor(perPage / 2));
+              attempt++;
+              setStatus(`Resource limit · retrying page ${page} at ${perPage}/page`);
+              continue;
+            }
+            throw e;
+          }
+        }
       }
       toast({ title: `Scan complete`, description: `${all.length} posts contain leaked CSS.` });
     } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
@@ -401,22 +425,42 @@ function BulkCleanupPanel() {
 
   const fixAll = async () => {
     if (!items || items.length === 0) return;
-    if (!confirm(`Re-wrap orphan CSS in ${items.length} post(s)? The orphan CSS that currently shows as visible text at the top of these posts will be moved back inside a single <style> tag. Live posts are updated in place.`)) return;
+    const willPublish = autoPublish;
+    if (!confirm(`Re-wrap orphan CSS in ${items.length} post(s)?${willPublish ? " Each post will also be republished to flush CDN caches." : ""} The orphan CSS that currently shows as visible text at the top of these posts will be moved back inside a single <style> tag. Live posts are updated in place.`)) return;
     setFixing(true);
     try {
       const ids = items.map((i) => i.post_id);
       const all: FixResult[] = [];
       for (let i = 0; i < ids.length; i += 1) {
-        setStatus(`Fixing ${i + 1}/${ids.length} · post ${ids[i]}`);
-        const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]] });
+        setStatus(`Fixing ${i + 1}/${ids.length} · post ${ids[i]}${willPublish ? " (+publish)" : ""}`);
+        const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]], publish: willPublish });
         all.push(...r.results);
         setResults([...all]);
       }
       setResults(all);
       const ok = all.filter((r) => r.ok).length;
       const failed = all.filter((r) => !r.ok).length;
-      toast({ title: `Cleanup done`, description: `${ok} fixed, ${failed} failed.` });
+      toast({ title: `Cleanup done`, description: `${ok} fixed, ${failed} failed${willPublish ? `, republished` : ""}.` });
     } catch (e: any) { toast({ title: "Cleanup failed", description: e.message, variant: "destructive" }); }
+    setStatus(""); setFixing(false);
+  };
+
+  const publishAll = async () => {
+    if (!items || items.length === 0) return;
+    if (!confirm(`Force-republish ${items.length} post(s)? This bumps the modified date and re-fires WordPress publish hooks (purges page/CDN caches). Content is NOT changed.`)) return;
+    setFixing(true);
+    try {
+      const ids = items.map((i) => i.post_id);
+      const all: FixResult[] = [];
+      for (let i = 0; i < ids.length; i += 1) {
+        setStatus(`Republishing ${i + 1}/${ids.length} · post ${ids[i]}`);
+        const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "publish", post_ids: [ids[i]] });
+        all.push(...r.results);
+        setResults([...all]);
+      }
+      const ok = all.filter((r) => r.ok).length;
+      toast({ title: `Republish done`, description: `${ok}/${ids.length} republished.` });
+    } catch (e: any) { toast({ title: "Republish failed", description: e.message, variant: "destructive" }); }
     setStatus(""); setFixing(false);
   };
 
@@ -443,7 +487,7 @@ function BulkCleanupPanel() {
       const lookup = await callAudit<{ affected: LeakItem[] }>("wp-bulk-cleanup", { mode: "scan_url", url: targetUrl.trim() });
       const post = (lookup.affected || [])[0];
       if (!post) { toast({ title: "No matching post" }); setTargetBusy(false); return; }
-      const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "fix", post_ids: [post.post_id] });
+      const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "fix", post_ids: [post.post_id], publish: autoPublish });
       setItems([{ ...post, found: true }]);
       setResults(r.results);
       const res = r.results[0];
@@ -499,7 +543,7 @@ function BulkCleanupPanel() {
             <CardTitle className="text-base">Site-wide CSS leak cleanup</CardTitle>
             <p className="text-xs text-muted-foreground mt-1">Scans every published post for orphan CSS rendered as visible text (the <code>.gutf-article {`{ ... !important }`}</code> block at the top of posts). The fix re-wraps the orphan CSS in a single <code>&lt;style&gt;</code> tag inside the post — preserving the design, removing the visible leak.</p>
           </div>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-center">
             <Button size="sm" variant="outline" onClick={scan} disabled={scanning || fixing}>
               {scanning ? <Loader2 className="size-4 animate-spin mr-2" /> : <RefreshCw className="size-4 mr-2" />}
               {scanning && status ? status : "Scan all posts"}
@@ -508,6 +552,13 @@ function BulkCleanupPanel() {
               {fixing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
               {fixing && status ? status : `Fix ${items?.length ?? 0} posts`}
             </Button>
+            <Button size="sm" variant="default" onClick={publishAll} disabled={fixing || scanning || !items || items.length === 0} title="Force-republish (bumps modified date, purges CDN). Does not modify content.">
+              Republish {items?.length ?? 0}
+            </Button>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none ml-1">
+              <input type="checkbox" checked={autoPublish} onChange={(e) => setAutoPublish(e.target.checked)} className="size-3.5 accent-primary" />
+              Auto-publish on Fix
+            </label>
             <Button size="sm" variant="outline" onClick={exportCsv} disabled={!items || items.length === 0}>Export CSV</Button>
             <Button size="sm" variant="outline" onClick={exportJson} disabled={!items || items.length === 0}>Export JSON</Button>
           </div>

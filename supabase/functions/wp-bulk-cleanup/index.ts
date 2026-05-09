@@ -219,11 +219,12 @@ Deno.serve(async (req) => {
   // ── SCAN ────────────────────────────────────────────────────────────────
   // Scans 1 REST page (up to 100 posts) of public posts per call.
   if (mode === "scan") {
-    // Memory-safe: 25 posts per page (was 100). Each post can carry 50–200KB of
-    // rendered HTML; 100 of those + regex work blew past the 150MB worker cap
-    // (see: WORKER_RESOURCE_LIMIT in edge logs). 25 keeps peak heap well under.
-    const PER_PAGE = 25;
-    const page = Math.max(1, Math.min(200, Number(body.page) || 1));
+    // Adaptive page size. Client passes `perPage`; server clamps to [10, 100].
+    // On WORKER_RESOURCE_LIMIT the client halves and retries; on success it
+    // ramps back up. Default 50 = 2x faster than the old 25 baseline while
+    // still staying well under the 150MB worker cap on typical posts.
+    const PER_PAGE = Math.max(10, Math.min(100, Number(body.perPage) || 50));
+    const page = Math.max(1, Math.min(400, Number(body.page) || 1));
     const url = `${WP_BASE}/posts?per_page=${PER_PAGE}&page=${page}&status=publish&_fields=id,slug,link,title,content`;
     const res = await fetch(url, { headers: { "User-Agent": "GearupAudit/2.0", Accept: "application/json" } });
     if (res.status === 400 && page > 1) {
@@ -291,11 +292,21 @@ Deno.serve(async (req) => {
         });
       }
       const { html: cleaned, removed } = rewrapOrphanCss(raw);
-      if (cleaned === raw) {
+      const wantsPublish = body.publish === true || body.publish === "true";
+      const contentChanged = cleaned !== raw;
+      if (!contentChanged && !wantsPublish) {
         return jsonRes({
           mode, attempted: 1, fixed: 1,
-          results: [{ post_id: id, ok: true, removed_chars: 0 }],
+          results: [{ post_id: id, ok: true, removed_chars: 0, published: false }],
         });
+      }
+      // Build update payload. When publish=true, also bump status and modified
+      // date so WP fires the post_updated hook (purges page caches & CDN).
+      const payload: Record<string, unknown> = {};
+      if (contentChanged) payload.content = cleaned;
+      if (wantsPublish) {
+        payload.status = "publish";
+        payload.date_gmt = new Date().toISOString().replace(/\.\d+Z$/, "");
       }
       const updateRes = await fetch(`${WP_BASE}/posts/${id}`, {
         method: "POST",
@@ -303,7 +314,7 @@ Deno.serve(async (req) => {
           Authorization: auth, "Content-Type": "application/json",
           "User-Agent": "GearupAudit/2.0",
         },
-        body: JSON.stringify({ content: cleaned }),
+        body: JSON.stringify(payload),
       });
       if (!updateRes.ok) {
         const t = await updateRes.text();
@@ -313,10 +324,10 @@ Deno.serve(async (req) => {
         });
       }
       await updateRes.text();
-      await logEvent(id, `Re-wrapped orphan CSS (${removed} chars of wrappers removed)`);
+      await logEvent(id, `Re-wrapped orphan CSS (${removed} chars wrappers removed)${wantsPublish ? " · republished" : ""}`);
       return jsonRes({
         mode, attempted: 1, fixed: 1,
-        results: [{ post_id: id, ok: true, removed_chars: removed }],
+        results: [{ post_id: id, ok: true, removed_chars: removed, published: wantsPublish }],
       });
     } catch (e) {
       return jsonRes({
@@ -326,7 +337,38 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ── SCAN_URL ────────────────────────────────────────────────────────────
+  // ── PUBLISH ─────────────────────────────────────────────────────────────
+  // Force-republish a post (status=publish + bumped modified date) so WP fires
+  // its update hooks and CDN/page caches purge. 1 post per call.
+  if (mode === "publish") {
+    const user = Deno.env.get("WP_USERNAME");
+    const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
+    if (!user || !pass) return jsonRes({ error: "WP credentials not configured" }, 500);
+    const ids = Array.isArray(body.post_ids) ? body.post_ids.map(Number).filter(Boolean) : [];
+    if (!ids.length) return jsonRes({ error: "post_ids required" }, 400);
+    const id = ids[0];
+    const auth = "Basic " + btoa(`${user}:${pass}`);
+    try {
+      const up = await fetch(`${WP_BASE}/posts/${id}`, {
+        method: "POST",
+        headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/2.0" },
+        body: JSON.stringify({
+          status: "publish",
+          date_gmt: new Date().toISOString().replace(/\.\d+Z$/, ""),
+        }),
+      });
+      if (!up.ok) {
+        const t = await up.text();
+        return jsonRes({ mode, results: [{ post_id: id, ok: false, error: `Publish ${up.status}: ${t.slice(0,160)}` }] });
+      }
+      await up.text();
+      await logEvent(id, "Force republished");
+      return jsonRes({ mode, results: [{ post_id: id, ok: true, published: true }] });
+    } catch (e) {
+      return jsonRes({ mode, results: [{ post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) }] });
+    }
+  }
+
   // Targeted scan for a single URL/slug.
   if (mode === "scan_url") {
     const url = String(body.url || "").trim();
