@@ -219,8 +219,12 @@ Deno.serve(async (req) => {
   // ── SCAN ────────────────────────────────────────────────────────────────
   // Scans 1 REST page (up to 100 posts) of public posts per call.
   if (mode === "scan") {
-    const page = Math.max(1, Math.min(50, Number(body.page) || 1));
-    const url = `${WP_BASE}/posts?per_page=100&page=${page}&status=publish&_fields=id,slug,link,title,content`;
+    // Memory-safe: 25 posts per page (was 100). Each post can carry 50–200KB of
+    // rendered HTML; 100 of those + regex work blew past the 150MB worker cap
+    // (see: WORKER_RESOURCE_LIMIT in edge logs). 25 keeps peak heap well under.
+    const PER_PAGE = 25;
+    const page = Math.max(1, Math.min(200, Number(body.page) || 1));
+    const url = `${WP_BASE}/posts?per_page=${PER_PAGE}&page=${page}&status=publish&_fields=id,slug,link,title,content`;
     const res = await fetch(url, { headers: { "User-Agent": "GearupAudit/2.0", Accept: "application/json" } });
     if (res.status === 400 && page > 1) {
       return jsonRes({ mode, page, totalPages: page - 1, count: 0, affected: [], done: true });
@@ -231,20 +235,28 @@ Deno.serve(async (req) => {
     }
     const totalPages = Number(res.headers.get("x-wp-totalpages") || page);
     const posts: Post[] = await res.json();
-    const affected = posts.flatMap((p) => {
+    const affected: Array<{ post_id: number; link: string; title: string; sample?: string }> = [];
+    // Process one post at a time and null out content to let GC reclaim memory.
+    for (let i = 0; i < posts.length; i++) {
+      const p = posts[i];
       const html = p.content?.rendered || "";
-      if (!html) return [];
-      const leak = renderedHasLeak(html);
-      if (!leak.found) return [];
-      return [{
-        post_id: Number(p.id),
-        link: p.link || `${APEX}/?p=${p.id}`,
-        title: plainTitle(p),
-        sample: leak.sample,
-      }];
-    });
-    const done = page >= totalPages || posts.length < 100;
-    return jsonRes({ mode, page, totalPages, count: affected.length, affected, done });
+      if (html) {
+        const leak = renderedHasLeak(html);
+        if (leak.found) {
+          affected.push({
+            post_id: Number(p.id),
+            link: p.link || `${APEX}/?p=${p.id}`,
+            title: plainTitle(p),
+            sample: leak.sample,
+          });
+        }
+      }
+      // Free the largest field on the post so it can be collected.
+      if (p.content) p.content.rendered = "";
+      posts[i] = undefined as unknown as Post;
+    }
+    const done = page >= totalPages || posts.length < PER_PAGE;
+    return jsonRes({ mode, page, totalPages, count: affected.length, affected, done, perPage: PER_PAGE });
   }
 
   // ── FIX ─────────────────────────────────────────────────────────────────
