@@ -543,7 +543,7 @@ function BulkCleanupPanel() {
             <CardTitle className="text-base">Site-wide CSS leak cleanup</CardTitle>
             <p className="text-xs text-muted-foreground mt-1">Scans every published post for orphan CSS rendered as visible text (the <code>.gutf-article {`{ ... !important }`}</code> block at the top of posts). The fix re-wraps the orphan CSS in a single <code>&lt;style&gt;</code> tag inside the post — preserving the design, removing the visible leak.</p>
           </div>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-center">
             <Button size="sm" variant="outline" onClick={scan} disabled={scanning || fixing}>
               {scanning ? <Loader2 className="size-4 animate-spin mr-2" /> : <RefreshCw className="size-4 mr-2" />}
               {scanning && status ? status : "Scan all posts"}
@@ -552,6 +552,13 @@ function BulkCleanupPanel() {
               {fixing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
               {fixing && status ? status : `Fix ${items?.length ?? 0} posts`}
             </Button>
+            <Button size="sm" variant="default" onClick={publishAll} disabled={fixing || scanning || !items || items.length === 0} title="Force-republish (bumps modified date, purges CDN). Does not modify content.">
+              Republish {items?.length ?? 0}
+            </Button>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none ml-1">
+              <input type="checkbox" checked={autoPublish} onChange={(e) => setAutoPublish(e.target.checked)} className="size-3.5 accent-primary" />
+              Auto-publish on Fix
+            </label>
             <Button size="sm" variant="outline" onClick={exportCsv} disabled={!items || items.length === 0}>Export CSV</Button>
             <Button size="sm" variant="outline" onClick={exportJson} disabled={!items || items.length === 0}>Export JSON</Button>
           </div>
