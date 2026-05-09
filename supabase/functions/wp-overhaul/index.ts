@@ -267,9 +267,9 @@ function buildSeedContent(fixes: Record<string, any>): string {
     ? fixes.introHtml.trim()
     : (typeof fixes.introParagraph === "string" && fixes.introParagraph.trim() ? `<p>${fixes.introParagraph.trim()}</p>` : "");
   if (intro) blocks.push(`<!--gutf:intro-->${intro}<!--/gutf:intro-->`);
-  if (Array.isArray(fixes.h2Outline) && fixes.h2Outline.length) {
-    blocks.push(`<section class="gutf-outline"><h2>Recommended Content Structure</h2><ul>${fixes.h2Outline.map((h: unknown) => `<li>${String(h).replace(/[<>]/g, "")}</li>`).join("")}</ul></section>`);
-  }
+  // Note: deliberately NOT injecting an "Recommended Content Structure" outline list.
+  // That placeholder rendered as visible bullet points and made the post look empty.
+  // Real <section><h2> body content must come from generatePremiumContent.sectionsHtml.
   if (typeof fixes.faqHtml === "string" && fixes.faqHtml.trim()) blocks.push(`<!--gutf:faq-->${fixes.faqHtml.trim()}<!--/gutf:faq-->`);
   if (typeof fixes.conclusionHtml === "string" && fixes.conclusionHtml.trim()) blocks.push(`<!--gutf:bottom-line-->${fixes.conclusionHtml.trim()}<!--/gutf:bottom-line-->`);
   return blocks.length ? `<div class="gutf-article gutf-generated-overhaul">\n${blocks.join("\n")}\n</div>` : "";
@@ -288,6 +288,13 @@ function stripTags(value: unknown): string {
   return String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function htmlWordCount(html: string): number {
+  return stripTags(html).split(/\s+/).filter(Boolean).length;
+}
+function countTag(html: string, tag: string): number {
+  return (String(html || "").match(new RegExp(`<${tag}\\b`, "gi")) || []).length;
+}
+
 async function generatePremiumContent(post: any, existingRaw: string, providedFixes: Record<string, any>): Promise<Record<string, any>> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) return providedFixes || {};
@@ -295,26 +302,35 @@ async function generatePremiumContent(post: any, existingRaw: string, providedFi
   const excerpt = stripTags(post?.excerpt?.raw || post?.excerpt?.rendered || "");
   const link = String(post?.link || "");
   const sourceText = stripTags(existingRaw).slice(0, 8000);
-  const sys = `You are a world-class SEO editor and copywriter for gearuptofit.com (fitness, training, gear, nutrition).
-Your job: produce a #1-ranking, EEAT-grade, semantically rich blog post body.
 
-Rules:
-- Output STRICT JSON ONLY (no markdown fences). Schema:
-  {
-    "metaTitle": string (<=60 chars, primary keyword first),
-    "metaDescription": string (<=158 chars, compelling, includes primary keyword),
-    "primaryKeyword": string,
-    "semanticKeywords": string[] (12-20 LSI/related terms),
-    "entities": string[] (8-15 named entities relevant to topic),
-    "introHtml": string (1 punchy <p> with primary keyword in first sentence + 1 <p> stating user benefit; 60-110 words total),
-    "sectionsHtml": string (5-8 <section> blocks, each with one <h2>, optional <h3>, well-formed <p>, <ul>/<ol> where useful, <table class=\"gutf-comparison\"> when comparison is helpful, semantic HTML only; no inline styles; cover the topic exhaustively to outrank competitors; integrate semanticKeywords and entities naturally),
-    "faqHtml": string (<section class=\"gutf-faq\"><h2>Frequently Asked Questions</h2> 5-7 <div class=\"gutf-faq-item\"><h3>Q</h3><p>A</p></div>),
-    "conclusionHtml": string (<div class=\"gutf-bottom-line\"><h2>Bottom Line</h2><p>...</p></div>, 70-120 words, with a clear takeaway),
-    "jsonLd": object (schema.org Article + FAQPage combined as @graph)
-  }
-- HTML must be valid, semantic, mobile-friendly, NO inline width/height pixel styles, NO <script>, NO <style>.
-- Tone: confident, expert, evidence-aware, concise. No fluff. No AI disclaimers.
-- Outrank competitors by being more comprehensive, specific, and useful.`;
+  // Strict body requirements — anything less = "empty looking" post.
+  const MIN_BODY_WORDS = 1200;
+  const MIN_BODY_H2 = 4;
+
+  const sys = `You are a world-class SEO editor and copywriter for gearuptofit.com (fitness, training, gear, nutrition).
+Your job: produce a #1-ranking, EEAT-grade, semantically rich, FULL-LENGTH blog post body.
+
+CRITICAL CONTENT REQUIREMENTS — non-negotiable:
+- sectionsHtml MUST contain at least ${MIN_BODY_H2} <section> blocks, each with one <h2> headline and 2-5 well-developed <p> paragraphs (plus optional <h3>, <ul>/<ol>, <table class="gutf-comparison">).
+- Total visible prose across sectionsHtml MUST be at least ${MIN_BODY_WORDS} words.
+- Cover the topic exhaustively — methodology, science, mistakes, programming, examples, comparisons, FAQ-adjacent depth.
+- Integrate semanticKeywords and entities naturally throughout the body.
+- No filler, no AI disclaimers, no "in this article we will...". Confident expert voice.
+
+Output STRICT JSON ONLY (no markdown fences). Schema:
+{
+  "metaTitle": string (<=60 chars, primary keyword first),
+  "metaDescription": string (<=158 chars, primary keyword, compelling),
+  "primaryKeyword": string,
+  "semanticKeywords": string[] (12-20 LSI/related terms),
+  "entities": string[] (8-15 named entities),
+  "introHtml": string (1 punchy <p> with primary keyword in first sentence + 1 <p> stating user benefit; 60-110 words),
+  "sectionsHtml": string (the FULL article body — 5-8 <section> blocks meeting the requirements above),
+  "faqHtml": string (<section class="gutf-faq"><h2>Frequently Asked Questions</h2> 5-7 <div class="gutf-faq-item"><h3>Q</h3><p>A</p></div></section>),
+  "conclusionHtml": string (<div class="gutf-bottom-line"><h2>Bottom Line</h2><p>...</p></div>, 70-120 words),
+  "jsonLd": object (schema.org Article + FAQPage @graph)
+}
+- HTML must be valid, semantic, mobile-friendly, NO inline width/height pixel styles, NO <script>, NO <style>.`;
 
   const usr = `TITLE: ${title}
 URL: ${link}
@@ -323,31 +339,46 @@ EXCERPT: ${excerpt}
 EXISTING CONTENT (may be empty or thin — rewrite/expand to be the best on the web):
 ${sourceText}
 
-Return the JSON now.`;
+Return the JSON now. Remember: sectionsHtml must be the full ${MIN_BODY_WORDS}+ word body with ${MIN_BODY_H2}+ <h2> sections.`;
 
-  try {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-pro",
-        messages: [{ role: "system", content: sys }, { role: "user", content: usr }],
-        response_format: { type: "json_object" },
-      }),
-    });
-    if (!res.ok) {
-      console.error("AI gen failed", res.status, await res.text().catch(() => ""));
-      return providedFixes || {};
+  let lastAi: Record<string, any> = {};
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const reinforcement = attempt === 1 ? "" :
+        `\n\nPREVIOUS ATTEMPT FAILED VALIDATION: sectionsHtml had ${htmlWordCount(lastAi.sectionsHtml || "")} words and ${countTag(lastAi.sectionsHtml || "", "h2")} <h2> sections. You MUST return a sectionsHtml field with at least ${MIN_BODY_H2} <h2> sections and ${MIN_BODY_WORDS}+ words of real prose. This is your retry attempt ${attempt}/3.`;
+      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-pro",
+          messages: [
+            { role: "system", content: sys },
+            { role: "user", content: usr + reinforcement },
+          ],
+          max_tokens: 16000,
+          response_format: { type: "json_object" },
+        }),
+      });
+      if (!res.ok) {
+        console.error("AI gen failed", res.status, await res.text().catch(() => ""));
+        continue;
+      }
+      const data = await res.json();
+      const txt = data?.choices?.[0]?.message?.content || "{}";
+      const ai = JSON.parse(String(txt).replace(/^```json\s*|\s*```$/g, ""));
+      lastAi = ai;
+      const wc = htmlWordCount(ai.sectionsHtml || "");
+      const h2c = countTag(ai.sectionsHtml || "", "h2");
+      console.log(`AI attempt ${attempt}: sections words=${wc}, h2=${h2c}`);
+      if (wc >= MIN_BODY_WORDS && h2c >= MIN_BODY_H2) {
+        return { ...ai, ...(providedFixes || {}) };
+      }
+    } catch (e) {
+      console.error("AI gen exception", attempt, e);
     }
-    const data = await res.json();
-    const txt = data?.choices?.[0]?.message?.content || "{}";
-    const ai = JSON.parse(txt.replace(/^```json\s*|\s*```$/g, ""));
-    // Caller-provided fixes override AI to preserve user intent
-    return { ...ai, ...(providedFixes || {}) };
-  } catch (e) {
-    console.error("AI gen exception", e);
-    return providedFixes || {};
   }
+  // Return whatever we got; downstream verification will reject if body is empty.
+  return { ...lastAi, ...(providedFixes || {}) };
 }
 
 function injectSections(html: string, sectionsHtml: string): { html: string; added: boolean } {
@@ -506,7 +537,19 @@ Deno.serve(async (req) => {
   // Re-run visual transforms over AI-injected blocks (lazy imgs, table wrap, iframe wrap)
   const visual2 = applyVisualFixes(html); html = visual2.html; changes.push(...visual2.changes.map((c) => `post:${c}`));
 
-  if (dryRun) return jsonRes({ ok: true, dry_run: true, changes, preview: html.slice(0, 4000) });
+  // Pre-publish gate: refuse to write a post that will look empty.
+  const bodyWords = htmlWordCount(html);
+  const bodyH2 = countTag(html, "h2");
+  if (bodyWords < 600 || bodyH2 < 3) {
+    await logEvent(postId, `Refusing to publish empty-looking content: words=${bodyWords} h2=${bodyH2}`, false);
+    return jsonRes({
+      ok: false, post_id: postId, changes,
+      message: `Refused to publish: AI body content insufficient (words=${bodyWords}, h2 sections=${bodyH2}). Required: ≥600 words and ≥3 H2 sections. The AI Gateway likely returned a truncated response — retry the overhaul.`,
+      content_source: contentSource, body_word_count: bodyWords, body_h2_count: bodyH2,
+    }, 200);
+  }
+
+  if (dryRun) return jsonRes({ ok: true, dry_run: true, changes, preview: html.slice(0, 4000), body_word_count: bodyWords, body_h2_count: bodyH2 });
 
   if (html === raw && (!fixes.metaTitle || fixes.metaTitle === post.title?.raw) && (!fixes.metaDescription || fixes.metaDescription === post.excerpt?.raw)) {
     await logEvent(postId, "No-op (already overhauled)", true);
@@ -542,11 +585,15 @@ Deno.serve(async (req) => {
   const verifyContent = String(verifyBody?.content?.raw || verifyBody?.content?.rendered || "");
   const restHasSignals = containsAppliedSignal(verifyContent);
   const restHasRunMarker = containsRunMarker(verifyContent, runId);
+  const restBodyWords = htmlWordCount(verifyContent);
+  const restBodyH2 = countTag(verifyContent, "h2");
   const savedPublished = String(verifyBody?.status || updatedPost?.status || "") === "publish";
   let liveHasContentSlot: boolean | null = null;
   let liveHasSignals = false;
   let liveHasRunMarker = false;
   let liveStatus: number | null = null;
+  let liveBodyWords = 0;
+  let liveBodyH2 = 0;
   let liveUrl = canonicalPublicUrl(String(updatedPost?.link || post?.link || ""));
   let visualReport: { score: number; checks: Record<string, boolean | number>; issues: string[] } | null = null;
   if (liveUrl) {
@@ -565,21 +612,28 @@ Deno.serve(async (req) => {
             const tag = (liveHtml.slice(idx).match(/<(article|main)\b/i) || ["", "article"])[1].toLowerCase();
             return findBalancedElement(liveHtml, tag, idx) || liveHtml;
           })();
+          const articleClean = stripNonContent(articleZone);
+          liveBodyWords = htmlWordCount(articleClean);
+          liveBodyH2 = countTag(articleClean, "h2");
           visualReport = visualValidate(articleZone);
-          if (liveHasRunMarker) break;
+          if (liveHasRunMarker && liveBodyWords >= 600 && liveBodyH2 >= 3) break;
         }
       } catch { /* retry below */ }
       await sleep(900 * attempt);
     }
   }
 
-  const verification = { rest_has_signals: restHasSignals, rest_has_run_marker: restHasRunMarker, saved_status_publish: savedPublished, live_url: liveUrl, live_status: liveStatus, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals, live_has_run_marker: liveHasRunMarker, run_marker: marker };
-  if (!savedPublished || !restHasSignals || !restHasRunMarker || !liveHasRunMarker) {
-    await logEvent(postId, `Overhaul not live-verified; saved=${savedPublished} rest_marker=${restHasRunMarker} live_marker=${liveHasRunMarker} (${changes.join(", ")})`, false);
-    return jsonRes({ ok: false, post_id: postId, changes, message: liveHasRunMarker ? "WordPress saved the overhaul, but publish status verification failed." : "WordPress accepted the update, but the public live post did not show this exact publish run after cache-busted re-fetch. Treating as NOT published/visible.", content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } }, 200);
+  const liveBodyOk = liveBodyWords >= 600 && liveBodyH2 >= 3;
+  const verification = { rest_has_signals: restHasSignals, rest_has_run_marker: restHasRunMarker, rest_body_word_count: restBodyWords, rest_body_h2_count: restBodyH2, saved_status_publish: savedPublished, live_url: liveUrl, live_status: liveStatus, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals, live_has_run_marker: liveHasRunMarker, live_body_word_count: liveBodyWords, live_body_h2_count: liveBodyH2, live_body_ok: liveBodyOk, run_marker: marker };
+  if (!savedPublished || !restHasSignals || !restHasRunMarker || !liveHasRunMarker || !liveBodyOk) {
+    const reason = !liveBodyOk && liveHasRunMarker
+      ? `Live page renders the run marker but the visible article body is too thin (words=${liveBodyWords}, h2=${liveBodyH2}). Reader will see a near-empty post. Likely cause: WordPress KSES stripped <section> tags, an Elementor/page-builder template overrides post_content, or CDN cache is serving an older render.`
+      : (liveHasRunMarker ? "WordPress saved the overhaul, but publish status verification failed." : "WordPress accepted the update, but the public live post did not show this exact publish run after cache-busted re-fetch. Treating as NOT published/visible.");
+    await logEvent(postId, `Overhaul not live-verified; saved=${savedPublished} rest_marker=${restHasRunMarker} live_marker=${liveHasRunMarker} body_ok=${liveBodyOk} live_words=${liveBodyWords} live_h2=${liveBodyH2} (${changes.join(", ")})`, false);
+    return jsonRes({ ok: false, post_id: postId, changes, message: reason, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } }, 200);
   }
 
   const visualScore = visualReport?.score ?? null;
-  await logEvent(postId, `Overhauled and public-live verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"}; ${marker})`, true);
-  return jsonRes({ ok: true, post_id: postId, changes, message: `Applied, published, and verified on public live URL (visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}`, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
+  await logEvent(postId, `Overhauled and public-live verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"}; body=${liveBodyWords}w/${liveBodyH2}h2; ${marker})`, true);
+  return jsonRes({ ok: true, post_id: postId, changes, message: `Applied, published, and verified (${liveBodyWords} words · ${liveBodyH2} H2 sections · visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}`, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
 });
