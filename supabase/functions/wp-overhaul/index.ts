@@ -153,7 +153,12 @@ function applyVisualFixes(raw: string): { html: string; changes: string[] } {
 }
 
 function ensureResponsiveCss(html: string): { html: string; added: boolean } {
-  if (html.includes("/*gutf-overhaul-v1*/")) return { html, added: false };
+  // Migrate old v1 stylesheet to v2 (gorgeous components)
+  if (html.includes("/*gutf-overhaul-v1*/")) {
+    const stripped = html.replace(/<style>\/\*gutf-overhaul-v1\*\/[\s\S]*?<\/style>/g, "");
+    return { html: RESPONSIVE_CSS + "\n" + stripped, added: true };
+  }
+  if (html.includes("/*gutf-overhaul-v2*/")) return { html, added: false };
   return { html: RESPONSIVE_CSS + "\n" + html, added: true };
 }
 
