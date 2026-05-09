@@ -1074,7 +1074,7 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
   const [overhaulResult, setOverhaulResult] = useState<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any; visual?: any; body_word_count?: number; body_h2_count?: number } | null>(null);
   const [linkSugs, setLinkSugs] = useState<any[] | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
-  const [linkApplied, setLinkApplied] = useState<{ applied: number; links: any[] } | null>(null);
+  const [linkApplied, setLinkApplied] = useState<{ applied: number; links: any[]; skipped?: any[]; reconciled_stale_markers?: number } | null>(null);
 
   useEffect(() => { setFixes(null); setOverhaulResult(null); setLinkSugs(null); setLinkApplied(null); }, [post?.post_id]);
 
