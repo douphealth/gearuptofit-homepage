@@ -337,6 +337,7 @@ type DiffSummary = {
   wrapper_tags_removed: number;
   style_tags_before: number; style_tags_after: number; style_tags_added: number;
 };
+type VerifyStatus = "pending" | "checking" | "clean" | "leak" | "stale_cache" | "error";
 type FixResult = {
   post_id: number; ok: boolean;
   removed_chars?: number; error?: string;
@@ -344,6 +345,10 @@ type FixResult = {
   published?: boolean; rolled_back?: boolean;
   dry_run?: boolean; would_change?: boolean; would_publish?: boolean;
   diff?: DiffSummary;
+  verify?: VerifyStatus;
+  verify_verdict?: "clean" | "stale_cache" | "real_leak" | "origin_only" | "unknown";
+  verified_at?: string;
+  verify_error?: string;
 };
 type Verdict = {
   verdict: "clean" | "stale_cache" | "real_leak" | "origin_only";
