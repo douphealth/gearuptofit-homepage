@@ -127,6 +127,69 @@ function injectJsonLd(html: string, jsonLd: any): { html: string; added: boolean
   return { html: `${html}\n${block}`, added: true };
 }
 
+function stripNonContent(html: string): string {
+  return html
+    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, "")
+    .replace(/<header\b[\s\S]*?<\/header>/gi, "")
+    .replace(/<footer\b[\s\S]*?<\/footer>/gi, "")
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, "")
+    .replace(/<aside\b[\s\S]*?<\/aside>/gi, "");
+}
+
+function textLength(html: string): number {
+  return html.replace(/<[^>]+>/g, " ").replace(/&[a-z0-9#]+;/gi, " ").replace(/\s+/g, " ").trim().length;
+}
+
+function findBalancedElement(html: string, tag: string, start: number): string {
+  const openClose = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+  openClose.lastIndex = start;
+  let depth = 0;
+  let first = -1;
+  let m: RegExpExecArray | null;
+  while ((m = openClose.exec(html))) {
+    const token = m[0];
+    const isClose = token.startsWith(`</`);
+    const selfClosing = /\/\s*>$/.test(token);
+    if (!isClose) {
+      if (depth === 0) first = m.index;
+      if (!selfClosing) depth++;
+    } else {
+      depth--;
+      if (depth === 0 && first >= 0) return html.slice(first, openClose.lastIndex);
+    }
+  }
+  return "";
+}
+
+function extractPublicPostContent(pageHtml: string): { html: string; source: string; wordish: number } {
+  const clean = stripNonContent(pageHtml);
+  const candidates: Array<{ source: string; html: string }> = [];
+  for (const match of clean.matchAll(/<(article|main)\b[^>]*>/gi)) {
+    const html = findBalancedElement(clean, match[1].toLowerCase(), match.index || 0);
+    if (html) candidates.push({ source: match[1].toLowerCase(), html });
+  }
+  const contentClass = /<div\b[^>]*class=(['"])[^'"]*(?:entry-content|post-content|wp-block-post-content|elementor-widget-theme-post-content|elementor-widget-text-editor)[^'"]*\1[^>]*>/gi;
+  for (const match of clean.matchAll(contentClass)) {
+    const html = findBalancedElement(clean, "div", match.index || 0);
+    if (html) candidates.push({ source: "content-container", html });
+  }
+  const best = candidates
+    .map((c) => ({ ...c, wordish: textLength(c.html) }))
+    .filter((c) => c.wordish > 700 && /<(p|h2|h3|ul|ol|table|figure)\b/i.test(c.html))
+    .sort((a, b) => b.wordish - a.wordish)[0];
+  return best || { html: "", source: "none", wordish: 0 };
+}
+
+function hasLiveContentSlot(pageHtml: string): boolean {
+  const clean = stripNonContent(pageHtml);
+  return /<(article|main)\b/i.test(clean) || /class=(['"])[^'"]*(entry-content|post-content|wp-block-post-content|elementor-widget-theme-post-content)[^'"]*\1/i.test(clean);
+}
+
+function containsAppliedSignal(html: string): boolean {
+  return /gutf-faq|gutf-bottom-line|gutf-overhaul-v1|gutf:intro|application\/ld\+json/i.test(html || "");
+}
+
 async function logEvent(postId: number, message: string, ok: boolean) {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
