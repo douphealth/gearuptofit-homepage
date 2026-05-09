@@ -663,6 +663,16 @@ function BulkCleanupPanel() {
           processed.push(ids[i]);
           await saveCheckpoint({ phase: "fix", page: 1, processed_ids: processed, affected: items, results: all });
 
+          // Auto-verify after each successful fix.
+          if (r.results[0]?.ok && !r.results[0]?.dry_run && autoVerify) {
+            const link = items.find((it) => it.post_id === ids[i])?.link;
+            const v = await verifyOne(ids[i], link);
+            const idx = all.findIndex((x) => x.post_id === ids[i] && !x.dry_run);
+            if (idx >= 0) all[idx] = { ...all[idx], ...v };
+            setResults([...all]);
+            await saveCheckpoint({ phase: "fix", page: 1, processed_ids: processed, affected: items, results: all });
+          }
+
           if (!r.results[0]?.ok && autoRollback && succeededThisBatch.length > 0) {
             toast({ title: `Post ${ids[i]} failed`, description: `Auto-rolling back ${succeededThisBatch.length} previously-fixed post(s).`, variant: "destructive" });
             const rb = await rollbackBatch(succeededThisBatch);
