@@ -186,8 +186,20 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     if (sevFilter !== "all") {
       f = f.filter(({ score }) => score?.issues?.some((i) => i.severity === sevFilter));
     }
-    return f.sort((a, b) => (a.score?.score ?? 999) - (b.score?.score ?? 999));
-  }, [posts, scores, filter, sevFilter]);
+    const cwvOf = (s: any, key: string) => {
+      const v = s?.metrics?.cwv?.[key];
+      return typeof v === "number" ? v : 999;
+    };
+    return f.sort((a, b) => {
+      switch (sortBy) {
+        case "worst-cwv": return cwvOf(a.score, "score") - cwvOf(b.score, "score");
+        case "worst-lcp": return cwvOf(a.score, "lcpScore") - cwvOf(b.score, "lcpScore");
+        case "worst-cls": return cwvOf(a.score, "clsScore") - cwvOf(b.score, "clsScore");
+        case "worst-inp": return cwvOf(a.score, "inpScore") - cwvOf(b.score, "inpScore");
+        default: return (a.score?.score ?? 999) - (b.score?.score ?? 999);
+      }
+    });
+  }, [posts, scores, filter, sevFilter, sortBy]);
 
   const stats = useMemo(() => {
     const ss = Object.values(scores);
