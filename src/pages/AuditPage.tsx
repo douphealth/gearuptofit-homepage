@@ -487,7 +487,7 @@ function BulkCleanupPanel() {
       const lookup = await callAudit<{ affected: LeakItem[] }>("wp-bulk-cleanup", { mode: "scan_url", url: targetUrl.trim() });
       const post = (lookup.affected || [])[0];
       if (!post) { toast({ title: "No matching post" }); setTargetBusy(false); return; }
-      const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "fix", post_ids: [post.post_id] });
+      const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "fix", post_ids: [post.post_id], publish: autoPublish });
       setItems([{ ...post, found: true }]);
       setResults(r.results);
       const res = r.results[0];
