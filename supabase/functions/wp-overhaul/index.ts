@@ -215,6 +215,69 @@ function containsRunMarker(html: string, runId: string): boolean {
   return !!runId && String(html || "").includes(runMarker(runId));
 }
 
+const LIVE_MIN_VISIBLE_WORDS = 600;
+const LIVE_MIN_VISIBLE_H2 = 3;
+
+function stripInvisibleHtml(html: string): string {
+  return String(html || "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|noscript|svg)\b[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+\b(?:hidden|aria-hidden=(['"])true\1)[^>]*>[\s\S]*?<\/[^>]+>/gi, " ")
+    .replace(/<[^>]+style=(['"])[^'"]*(?:display\s*:\s*none|visibility\s*:\s*hidden)[^'"]*\1[^>]*>[\s\S]*?<\/[^>]+>/gi, " ");
+}
+
+function sampleH2(html: string): string[] {
+  return Array.from(String(html || "").matchAll(/<h2\b[^>]*>([\s\S]*?)<\/h2>/gi))
+    .map((m) => stripTags(m[1]).slice(0, 120))
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function analyzeLiveVisibility(pageHtml: string, runId: string, exactRunRequired: boolean) {
+  const clean = stripInvisibleHtml(stripNonContent(pageHtml));
+  const candidates: Array<{ source: string; html: string; priority: number }> = [];
+  const contentClass = /<div\b[^>]*class=(['"])[^'"]*(?:entry-content|post-content|wp-block-post-content|elementor-widget-theme-post-content|elementor-widget-text-editor|gutf-article)[^'"]*\1[^>]*>/gi;
+  for (const match of clean.matchAll(contentClass)) {
+    const html = findBalancedElement(clean, "div", match.index || 0);
+    if (html) candidates.push({ source: "content-container", html, priority: 4000 });
+  }
+  for (const match of clean.matchAll(/<(article|main)\b[^>]*>/gi)) {
+    const tag = match[1].toLowerCase();
+    const html = findBalancedElement(clean, tag, match.index || 0);
+    if (html) candidates.push({ source: tag, html, priority: tag === "article" ? 2500 : 1800 });
+  }
+  candidates.push({ source: "full-page-fallback", html: clean, priority: 0 });
+
+  const scored = candidates.map((c) => {
+    const hasRunMarker = containsRunMarker(c.html, runId);
+    const hasSignals = containsAppliedSignal(c.html);
+    const words = htmlWordCount(c.html);
+    const h2 = countTag(c.html, "h2");
+    const score = (hasRunMarker ? 1_000_000 : 0) + (hasSignals ? 250_000 : 0) + c.priority + (h2 * 500) + words;
+    return { ...c, hasRunMarker, hasSignals, words, h2, score };
+  });
+  const eligible = exactRunRequired ? scored.filter((c) => c.hasRunMarker) : scored;
+  const best = (eligible.length ? eligible : scored).sort((a, b) => b.score - a.score)[0] || scored[0];
+  const text = stripTags(best?.html || "").slice(0, 600);
+  const fullHasRunMarker = containsRunMarker(clean, runId);
+  const fullHasSignals = containsAppliedSignal(clean);
+  return {
+    live_has_content_slot: hasLiveContentSlot(clean),
+    live_has_signals: fullHasSignals,
+    live_has_run_marker: fullHasRunMarker,
+    live_body_word_count: best?.words || 0,
+    live_body_h2_count: best?.h2 || 0,
+    live_body_ok: (best?.words || 0) >= LIVE_MIN_VISIBLE_WORDS && (best?.h2 || 0) >= LIVE_MIN_VISIBLE_H2,
+    live_content_source: best?.source || "none",
+    live_selected_html_bytes: (best?.html || "").length,
+    live_heading_samples: sampleH2(best?.html || ""),
+    live_text_sample: text,
+    live_min_word_count: LIVE_MIN_VISIBLE_WORDS,
+    live_min_h2_count: LIVE_MIN_VISIBLE_H2,
+    live_exact_run_required: exactRunRequired,
+  };
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -229,7 +292,38 @@ async function fetchLiveHtml(url: string, runId: string, attempt: number) {
       Pragma: "no-cache",
     },
   });
-  return { ok: res.ok, status: res.status, url, html: res.ok ? await res.text() : await res.text().catch(() => "") };
+  return { ok: res.ok, status: res.status, url, fetched_url: verifyUrl, html: res.ok ? await res.text() : await res.text().catch(() => "") };
+}
+
+async function verifyLiveVisibility(url: string, runId: string, exactRunRequired: boolean, attempts = 5) {
+  let last: any = {
+    live_url: url,
+    live_status: null,
+    live_body_word_count: 0,
+    live_body_h2_count: 0,
+    live_body_ok: false,
+    live_has_content_slot: null,
+    live_has_signals: false,
+    live_has_run_marker: false,
+    live_content_source: "not-fetched",
+    live_min_word_count: LIVE_MIN_VISIBLE_WORDS,
+    live_min_h2_count: LIVE_MIN_VISIBLE_H2,
+    live_exact_run_required: exactRunRequired,
+    live_attempts: 0,
+  };
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const liveRes = await fetchLiveHtml(url, runId || `existing_${crypto.randomUUID()}`, attempt);
+      const analysis = liveRes.ok ? analyzeLiveVisibility(liveRes.html, runId, exactRunRequired) : {};
+      last = { ...last, ...analysis, live_url: url, live_fetched_url: liveRes.fetched_url, live_status: liveRes.status, live_attempts: attempt };
+      const exactOk = exactRunRequired ? last.live_has_run_marker : true;
+      if (liveRes.ok && exactOk && last.live_body_ok) break;
+    } catch (e) {
+      last = { ...last, live_attempts: attempt, live_error: String(e?.message || e) };
+    }
+    await sleep(900 * attempt);
+  }
+  return last;
 }
 
 async function logEvent(postId: number, message: string, ok: boolean) {
