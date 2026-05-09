@@ -288,6 +288,13 @@ function stripTags(value: unknown): string {
   return String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function htmlWordCount(html: string): number {
+  return stripTags(html).split(/\s+/).filter(Boolean).length;
+}
+function countTag(html: string, tag: string): number {
+  return (String(html || "").match(new RegExp(`<${tag}\\b`, "gi")) || []).length;
+}
+
 async function generatePremiumContent(post: any, existingRaw: string, providedFixes: Record<string, any>): Promise<Record<string, any>> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) return providedFixes || {};
@@ -295,26 +302,35 @@ async function generatePremiumContent(post: any, existingRaw: string, providedFi
   const excerpt = stripTags(post?.excerpt?.raw || post?.excerpt?.rendered || "");
   const link = String(post?.link || "");
   const sourceText = stripTags(existingRaw).slice(0, 8000);
-  const sys = `You are a world-class SEO editor and copywriter for gearuptofit.com (fitness, training, gear, nutrition).
-Your job: produce a #1-ranking, EEAT-grade, semantically rich blog post body.
 
-Rules:
-- Output STRICT JSON ONLY (no markdown fences). Schema:
-  {
-    "metaTitle": string (<=60 chars, primary keyword first),
-    "metaDescription": string (<=158 chars, compelling, includes primary keyword),
-    "primaryKeyword": string,
-    "semanticKeywords": string[] (12-20 LSI/related terms),
-    "entities": string[] (8-15 named entities relevant to topic),
-    "introHtml": string (1 punchy <p> with primary keyword in first sentence + 1 <p> stating user benefit; 60-110 words total),
-    "sectionsHtml": string (5-8 <section> blocks, each with one <h2>, optional <h3>, well-formed <p>, <ul>/<ol> where useful, <table class=\"gutf-comparison\"> when comparison is helpful, semantic HTML only; no inline styles; cover the topic exhaustively to outrank competitors; integrate semanticKeywords and entities naturally),
-    "faqHtml": string (<section class=\"gutf-faq\"><h2>Frequently Asked Questions</h2> 5-7 <div class=\"gutf-faq-item\"><h3>Q</h3><p>A</p></div>),
-    "conclusionHtml": string (<div class=\"gutf-bottom-line\"><h2>Bottom Line</h2><p>...</p></div>, 70-120 words, with a clear takeaway),
-    "jsonLd": object (schema.org Article + FAQPage combined as @graph)
-  }
-- HTML must be valid, semantic, mobile-friendly, NO inline width/height pixel styles, NO <script>, NO <style>.
-- Tone: confident, expert, evidence-aware, concise. No fluff. No AI disclaimers.
-- Outrank competitors by being more comprehensive, specific, and useful.`;
+  // Strict body requirements — anything less = "empty looking" post.
+  const MIN_BODY_WORDS = 1200;
+  const MIN_BODY_H2 = 4;
+
+  const sys = `You are a world-class SEO editor and copywriter for gearuptofit.com (fitness, training, gear, nutrition).
+Your job: produce a #1-ranking, EEAT-grade, semantically rich, FULL-LENGTH blog post body.
+
+CRITICAL CONTENT REQUIREMENTS — non-negotiable:
+- sectionsHtml MUST contain at least ${MIN_BODY_H2} <section> blocks, each with one <h2> headline and 2-5 well-developed <p> paragraphs (plus optional <h3>, <ul>/<ol>, <table class="gutf-comparison">).
+- Total visible prose across sectionsHtml MUST be at least ${MIN_BODY_WORDS} words.
+- Cover the topic exhaustively — methodology, science, mistakes, programming, examples, comparisons, FAQ-adjacent depth.
+- Integrate semanticKeywords and entities naturally throughout the body.
+- No filler, no AI disclaimers, no "in this article we will...". Confident expert voice.
+
+Output STRICT JSON ONLY (no markdown fences). Schema:
+{
+  "metaTitle": string (<=60 chars, primary keyword first),
+  "metaDescription": string (<=158 chars, primary keyword, compelling),
+  "primaryKeyword": string,
+  "semanticKeywords": string[] (12-20 LSI/related terms),
+  "entities": string[] (8-15 named entities),
+  "introHtml": string (1 punchy <p> with primary keyword in first sentence + 1 <p> stating user benefit; 60-110 words),
+  "sectionsHtml": string (the FULL article body — 5-8 <section> blocks meeting the requirements above),
+  "faqHtml": string (<section class="gutf-faq"><h2>Frequently Asked Questions</h2> 5-7 <div class="gutf-faq-item"><h3>Q</h3><p>A</p></div></section>),
+  "conclusionHtml": string (<div class="gutf-bottom-line"><h2>Bottom Line</h2><p>...</p></div>, 70-120 words),
+  "jsonLd": object (schema.org Article + FAQPage @graph)
+}
+- HTML must be valid, semantic, mobile-friendly, NO inline width/height pixel styles, NO <script>, NO <style>.`;
 
   const usr = `TITLE: ${title}
 URL: ${link}
@@ -323,31 +339,46 @@ EXCERPT: ${excerpt}
 EXISTING CONTENT (may be empty or thin — rewrite/expand to be the best on the web):
 ${sourceText}
 
-Return the JSON now.`;
+Return the JSON now. Remember: sectionsHtml must be the full ${MIN_BODY_WORDS}+ word body with ${MIN_BODY_H2}+ <h2> sections.`;
 
-  try {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-pro",
-        messages: [{ role: "system", content: sys }, { role: "user", content: usr }],
-        response_format: { type: "json_object" },
-      }),
-    });
-    if (!res.ok) {
-      console.error("AI gen failed", res.status, await res.text().catch(() => ""));
-      return providedFixes || {};
+  let lastAi: Record<string, any> = {};
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const reinforcement = attempt === 1 ? "" :
+        `\n\nPREVIOUS ATTEMPT FAILED VALIDATION: sectionsHtml had ${htmlWordCount(lastAi.sectionsHtml || "")} words and ${countTag(lastAi.sectionsHtml || "", "h2")} <h2> sections. You MUST return a sectionsHtml field with at least ${MIN_BODY_H2} <h2> sections and ${MIN_BODY_WORDS}+ words of real prose. This is your retry attempt ${attempt}/3.`;
+      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-pro",
+          messages: [
+            { role: "system", content: sys },
+            { role: "user", content: usr + reinforcement },
+          ],
+          max_tokens: 16000,
+          response_format: { type: "json_object" },
+        }),
+      });
+      if (!res.ok) {
+        console.error("AI gen failed", res.status, await res.text().catch(() => ""));
+        continue;
+      }
+      const data = await res.json();
+      const txt = data?.choices?.[0]?.message?.content || "{}";
+      const ai = JSON.parse(String(txt).replace(/^```json\s*|\s*```$/g, ""));
+      lastAi = ai;
+      const wc = htmlWordCount(ai.sectionsHtml || "");
+      const h2c = countTag(ai.sectionsHtml || "", "h2");
+      console.log(`AI attempt ${attempt}: sections words=${wc}, h2=${h2c}`);
+      if (wc >= MIN_BODY_WORDS && h2c >= MIN_BODY_H2) {
+        return { ...ai, ...(providedFixes || {}) };
+      }
+    } catch (e) {
+      console.error("AI gen exception", attempt, e);
     }
-    const data = await res.json();
-    const txt = data?.choices?.[0]?.message?.content || "{}";
-    const ai = JSON.parse(txt.replace(/^```json\s*|\s*```$/g, ""));
-    // Caller-provided fixes override AI to preserve user intent
-    return { ...ai, ...(providedFixes || {}) };
-  } catch (e) {
-    console.error("AI gen exception", e);
-    return providedFixes || {};
   }
+  // Return whatever we got; downstream verification will reject if body is empty.
+  return { ...lastAi, ...(providedFixes || {}) };
 }
 
 function injectSections(html: string, sectionsHtml: string): { html: string; added: boolean } {
