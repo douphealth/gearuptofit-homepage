@@ -957,7 +957,10 @@ Deno.serve(async (req) => {
   if (!postId) return jsonRes({ error: "post_id required" }, 400);
   const fixes = body.fixes || {};
   const dryRun = !!body.dry_run;
-  const premiumQuality = body.premium_quality !== false; // default ON
+  // Default OFF: the premium AI rewrite can exceed Edge runtime memory when the
+  // model returns a large article payload. The safe path applies caller fixes
+  // and local publishable fallbacks without loading a huge AI response.
+  const premiumQuality = body.premium_quality === true;
 
   const user = Deno.env.get("WP_USERNAME");
   const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
