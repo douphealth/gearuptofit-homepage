@@ -190,6 +190,43 @@ function containsAppliedSignal(html: string): boolean {
   return /gutf-faq|gutf-bottom-line|gutf-overhaul-v1|gutf:intro|application\/ld\+json/i.test(html || "");
 }
 
+function canonicalPublicUrl(url: string): string {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    u.hostname = "gearuptofit.com";
+    u.protocol = "https:";
+    return u.toString();
+  } catch {
+    return url.replace(/^https?:\/\/origin\.gearuptofit\.com/i, APEX);
+  }
+}
+
+function runMarker(runId: string): string {
+  return `gutf-publish-run-${runId}`;
+}
+
+function containsRunMarker(html: string, runId: string): boolean {
+  return !!runId && String(html || "").includes(runMarker(runId));
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchLiveHtml(url: string, runId: string, attempt: number) {
+  const sep = url.includes("?") ? "&" : "?";
+  const verifyUrl = `${url}${sep}_gutf_verify=${encodeURIComponent(runId)}_${attempt}_${Date.now()}`;
+  const res = await fetch(verifyUrl, {
+    headers: {
+      "User-Agent": "GearupAudit/3.1-public-verify",
+      "Cache-Control": "no-cache, no-store, max-age=0",
+      Pragma: "no-cache",
+    },
+  });
+  return { ok: res.ok, status: res.status, url, html: res.ok ? await res.text() : await res.text().catch(() => "") };
+}
+
 async function logEvent(postId: number, message: string, ok: boolean) {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
