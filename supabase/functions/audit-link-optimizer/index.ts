@@ -187,13 +187,63 @@ async function loadCorpus(supabase: any, excludeId: number) {
   return data || [];
 }
 
+async function fetchLivePost(postId: number): Promise<any | null> {
+  const user = Deno.env.get("WP_USERNAME");
+  const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
+  const auth = user && pass ? "Basic " + btoa(`${user}:${pass}`) : "";
+  const bases = ["https://origin.gearuptofit.com/wp-json/wp/v2", "https://gearuptofit.com/wp-json/wp/v2"];
+  for (const base of bases) {
+    try {
+      const url = auth
+        ? `${base}/posts/${postId}?context=edit&_fields=id,link,slug,title,content,modified_gmt,date_gmt,categories,tags`
+        : `${base}/posts/${postId}?_fields=id,link,slug,title,content,modified_gmt,date_gmt,categories,tags`;
+      const r = await fetch(url, {
+        headers: {
+          ...(auth ? { Authorization: auth } : {}),
+          "User-Agent": "GearupAudit/3.0",
+          Accept: "application/json",
+        },
+      });
+      if (r.ok) return await r.json();
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
 async function suggestForPost(supabase: any, sourceId: number, max = 6): Promise<{
   source: { id: number; title: string; link: string }; suggestions: Suggestion[];
 }> {
-  const { data: src } = await supabase.from("wp_posts_cache").select("*").eq("post_id", sourceId).maybeSingle();
-  if (!src) throw new Error("Source post not in cache");
-  const html: string = src.data?.content?.rendered || "";
-  if (!html) throw new Error("Source has no content");
+  let { data: src } = await supabase.from("wp_posts_cache").select("*").eq("post_id", sourceId).maybeSingle();
+  let html: string = src?.data?.content?.rendered || src?.data?.content?.raw || "";
+
+  // Cache miss OR thin/empty cached content → refresh from live WP and upsert.
+  if (!src || !html) {
+    const live = await fetchLivePost(sourceId);
+    const liveHtml = live?.content?.rendered || live?.content?.raw || "";
+    if (live && liveHtml) {
+      const refreshed = {
+        post_id: sourceId,
+        slug: live.slug || src?.slug || null,
+        title: (live.title?.rendered || src?.title || "").toString(),
+        link: live.link || src?.link || null,
+        modified_at: live.modified_gmt ? new Date(live.modified_gmt + "Z").toISOString() : (src?.modified_at || null),
+        data: live,
+        fetched_at: new Date().toISOString(),
+      };
+      await supabase.from("wp_posts_cache").upsert(refreshed, { onConflict: "post_id" });
+      src = refreshed as any;
+      html = liveHtml;
+    }
+  }
+
+  if (!src) {
+    const err: any = new Error("Source post not found in cache or on live WordPress");
+    err.status = 404; throw err;
+  }
+  if (!html) {
+    const err: any = new Error("Source post has no published content on the live WordPress site. Open it in WP editor and re-save once, then retry.");
+    err.status = 422; throw err;
+  }
   const sourceTitle = decodeEntities(stripHtml(src.title || src.data?.title?.rendered || ""));
   const sourceTokens = new Set(tokens(sourceTitle + " " + (src.slug || "")));
   const linked = existingLinks(html);
@@ -429,8 +479,9 @@ Deno.serve(async (req) => {
 
     throw new Error(`Unknown mode: ${mode}`);
   } catch (e: any) {
+    const status = Number(e?.status) || 500;
     return new Response(JSON.stringify({ error: e.message }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
