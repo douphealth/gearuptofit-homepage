@@ -188,23 +188,80 @@ function rewrapOrphanCss(raw: string): { html: string; removed: number } {
   return { html: out, removed: removedTotal };
 }
 
-async function logEvent(postId: number, message: string) {
+function svc() {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!url || !key) return;
+  return { url, key, ok: !!(url && key) };
+}
+async function dbFetch(path: string, init: RequestInit = {}) {
+  const { url, key, ok } = svc();
+  if (!ok) return null;
+  const headers: Record<string, string> = {
+    apikey: key!, Authorization: `Bearer ${key}`,
+    "Content-Type": "application/json",
+    ...(init.headers as Record<string, string> || {}),
+  };
+  return await fetch(`${url}/rest/v1/${path}`, { ...init, headers });
+}
+
+async function logEvent(postId: number, message: string) {
   try {
-    await fetch(`${url}/rest/v1/push_log`, {
+    await dbFetch("push_log", {
       method: "POST",
-      headers: {
-        apikey: key, Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json", Prefer: "return=minimal",
-      },
+      headers: { Prefer: "return=minimal" },
       body: JSON.stringify({
         post_id: postId, status: "cleanup", message,
         draft_url: `${APEX}/wp-admin/post.php?post=${postId}&action=edit`,
       }),
-    }).then((r) => r.text());
-  } catch { /* logging is best-effort */ }
+    });
+  } catch { /* best-effort */ }
+}
+
+async function saveBackup(postId: number, content: string, status: string | undefined, date_gmt: string | undefined, run_id?: string) {
+  try {
+    await dbFetch("wp_post_backups", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ post_id: postId, content, status, date_gmt, run_id }),
+    });
+  } catch { /* best-effort */ }
+}
+
+async function loadLatestBackup(postId: number): Promise<{ content: string; status?: string; date_gmt?: string } | null> {
+  try {
+    const r = await dbFetch(`wp_post_backups?post_id=eq.${postId}&order=created_at.desc&limit=1`, {
+      method: "GET", headers: { Accept: "application/json" },
+    });
+    if (!r || !r.ok) return null;
+    const arr = await r.json();
+    return arr[0] || null;
+  } catch { return null; }
+}
+
+// Lightweight diff summary (line counts, no full body)
+function diffSummary(before: string, after: string) {
+  const beforeLines = before.split(/\r?\n/);
+  const afterLines = after.split(/\r?\n/);
+  const beforeSet = new Set(beforeLines);
+  const afterSet = new Set(afterLines);
+  let added = 0, removed = 0;
+  for (const l of afterLines) if (!beforeSet.has(l)) added++;
+  for (const l of beforeLines) if (!afterSet.has(l)) removed++;
+  const wrappersRemoved = (before.match(/<\/?p\b[^>]*>|<br\s*\/?>/gi) || []).length
+    - (after.match(/<\/?p\b[^>]*>|<br\s*\/?>/gi) || []).length;
+  const styleBefore = (before.match(/<style\b/gi) || []).length;
+  const styleAfter = (after.match(/<style\b/gi) || []).length;
+  return {
+    chars_before: before.length,
+    chars_after: after.length,
+    chars_delta: after.length - before.length,
+    lines_added: added,
+    lines_removed: removed,
+    wrapper_tags_removed: Math.max(0, wrappersRemoved),
+    style_tags_before: styleBefore,
+    style_tags_after: styleAfter,
+    style_tags_added: Math.max(0, styleAfter - styleBefore),
+  };
 }
 
 Deno.serve(async (req) => {
