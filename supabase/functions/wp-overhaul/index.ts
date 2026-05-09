@@ -326,22 +326,24 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchLiveHtml(url: string, runId: string, attempt: number) {
-  const sep = url.includes("?") ? "&" : "?";
-  const verifyUrl = `${url}${sep}_gutf_verify=${encodeURIComponent(runId)}_${attempt}_${Date.now()}`;
-  const res = await fetch(verifyUrl, {
+async function fetchLiveHtml(url: string, runId: string, attempt: number, cacheBust = true) {
+  const cleanUrl = cleanPublicUrl(url);
+  const sep = cleanUrl.includes("?") ? "&" : "?";
+  const fetchUrl = cacheBust ? `${cleanUrl}${sep}_gutf_verify=${encodeURIComponent(runId)}_${attempt}_${Date.now()}` : cleanUrl;
+  const res = await fetch(fetchUrl, {
     headers: {
       "User-Agent": "GearupAudit/3.1-public-verify",
       "Cache-Control": "no-cache, no-store, max-age=0",
       Pragma: "no-cache",
     },
   });
-  return { ok: res.ok, status: res.status, url, fetched_url: verifyUrl, html: res.ok ? await res.text() : await res.text().catch(() => "") };
+  return { ok: res.ok, status: res.status, url: cleanUrl, fetched_url: fetchUrl, html: res.ok ? await res.text() : await res.text().catch(() => "") };
 }
 
-async function verifyLiveVisibility(url: string, runId: string, exactRunRequired: boolean, attempts = 5) {
+async function verifyLiveVisibility(url: string, runId: string, exactRunRequired: boolean, attempts = 5, cacheBust = true) {
   let last: any = {
-    live_url: url,
+    live_url: cleanPublicUrl(url),
+    live_cache_busted: cacheBust,
     live_status: null,
     live_body_word_count: 0,
     live_body_h2_count: 0,
@@ -357,9 +359,9 @@ async function verifyLiveVisibility(url: string, runId: string, exactRunRequired
   };
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      const liveRes = await fetchLiveHtml(url, runId || `existing_${crypto.randomUUID()}`, attempt);
+      const liveRes = await fetchLiveHtml(url, runId || `existing_${crypto.randomUUID()}`, attempt, cacheBust);
       const analysis = liveRes.ok ? analyzeLiveVisibility(liveRes.html, runId, exactRunRequired) : {};
-      last = { ...last, ...analysis, live_url: url, live_fetched_url: liveRes.fetched_url, live_status: liveRes.status, live_attempts: attempt, live_visual_report: liveRes.ok ? visualValidate(liveRes.html) : null };
+      last = { ...last, ...analysis, live_url: liveRes.url, live_fetched_url: liveRes.fetched_url, live_cache_busted: cacheBust, live_status: liveRes.status, live_attempts: attempt, live_visual_report: liveRes.ok ? visualValidate(liveRes.html) : null };
       const exactOk = exactRunRequired ? last.live_has_run_marker : true;
       if (liveRes.ok && exactOk && last.live_body_ok) break;
     } catch (e) {
@@ -368,6 +370,29 @@ async function verifyLiveVisibility(url: string, runId: string, exactRunRequired
     await sleep(900 * attempt);
   }
   return last;
+}
+
+async function verifyCanonicalAndBusted(url: string, runId: string, exactRunRequired: boolean, attempts = 5) {
+  const canonicalUrl = cleanPublicUrl(url);
+  let canonical = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, attempts, false);
+  let purge = null;
+  if (!canonical.live_body_ok || (exactRunRequired && !canonical.live_has_run_marker)) {
+    purge = await purgeCloudflareUrl(canonicalUrl);
+    if (purge?.ok) canonical = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, Math.max(2, attempts), false);
+  }
+  const busted = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, Math.max(2, Math.min(3, attempts)), true);
+  const canonicalOk = !!canonical.live_body_ok && (!exactRunRequired || !!canonical.live_has_run_marker);
+  const bustedOk = !!busted.live_body_ok && (!exactRunRequired || !!busted.live_has_run_marker);
+  return {
+    ...canonical,
+    live_canonical_url: canonicalUrl,
+    clean: canonical,
+    cache_busted: busted,
+    cache_purge: purge,
+    live_clean_ok: canonicalOk,
+    live_cache_busted_ok: bustedOk,
+    live_body_ok: canonicalOk && bustedOk,
+  };
 }
 
 async function logEvent(postId: number, message: string, ok: boolean) {
