@@ -267,9 +267,9 @@ function buildSeedContent(fixes: Record<string, any>): string {
     ? fixes.introHtml.trim()
     : (typeof fixes.introParagraph === "string" && fixes.introParagraph.trim() ? `<p>${fixes.introParagraph.trim()}</p>` : "");
   if (intro) blocks.push(`<!--gutf:intro-->${intro}<!--/gutf:intro-->`);
-  if (Array.isArray(fixes.h2Outline) && fixes.h2Outline.length) {
-    blocks.push(`<section class="gutf-outline"><h2>Recommended Content Structure</h2><ul>${fixes.h2Outline.map((h: unknown) => `<li>${String(h).replace(/[<>]/g, "")}</li>`).join("")}</ul></section>`);
-  }
+  // Note: deliberately NOT injecting an "Recommended Content Structure" outline list.
+  // That placeholder rendered as visible bullet points and made the post look empty.
+  // Real <section><h2> body content must come from generatePremiumContent.sectionsHtml.
   if (typeof fixes.faqHtml === "string" && fixes.faqHtml.trim()) blocks.push(`<!--gutf:faq-->${fixes.faqHtml.trim()}<!--/gutf:faq-->`);
   if (typeof fixes.conclusionHtml === "string" && fixes.conclusionHtml.trim()) blocks.push(`<!--gutf:bottom-line-->${fixes.conclusionHtml.trim()}<!--/gutf:bottom-line-->`);
   return blocks.length ? `<div class="gutf-article gutf-generated-overhaul">\n${blocks.join("\n")}\n</div>` : "";
