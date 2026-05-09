@@ -1071,7 +1071,7 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
   const [fixes, setFixes] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [pushing, setPushing] = useState(false);
-  const [overhaulResult, setOverhaulResult] = useState<{ changes: string[]; message: string } | null>(null);
+  const [overhaulResult, setOverhaulResult] = useState<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any } | null>(null);
   const [linkSugs, setLinkSugs] = useState<any[] | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkApplied, setLinkApplied] = useState<{ applied: number; links: any[] } | null>(null);
@@ -1094,9 +1094,9 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
     if (!confirm(`FULL OVERHAUL — applies all changes to LIVE post ${post.post_id}:\n\n• Wraps tables/iframes for mobile responsiveness\n• Strips fixed pixel widths\n• Adds lazy-loading to images\n• Injects intro, FAQ section, conclusion (idempotent — safe to re-run)\n• Adds JSON-LD schema\n• Adds responsive CSS guard\n• Updates meta title + description\n\nProceed?`)) return;
     setPushing(true);
     try {
-      const r = await callAudit<{ ok: boolean; changes: string[]; message: string }>("wp-overhaul", { post_id: post.post_id, fixes });
-      setOverhaulResult({ changes: r.changes || [], message: r.message || "" });
-      toast({ title: r.ok ? `Overhauled post ${post.post_id}` : "Overhaul failed", description: r.message });
+      const r = await callAudit<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any }>("wp-overhaul", { post_id: post.post_id, fixes });
+      setOverhaulResult({ ok: !!r.ok, changes: r.changes || [], message: r.message || "", content_source: r.content_source, verification: r.verification });
+      toast({ title: r.ok ? `Verified overhaul ${post.post_id}` : "Overhaul not applied", description: r.message, variant: r.ok ? "default" : "destructive" });
     } catch (e: any) { toast({ title: "Overhaul failed", description: e.message, variant: "destructive" }); }
     setPushing(false);
   };
@@ -1317,9 +1317,17 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
                 FULL OVERHAUL — apply all to live post
               </Button>
               {overhaulResult && (
-                <div className="text-xs p-3 border rounded-md bg-emerald-500/10">
-                  <div className="font-medium text-emerald-500 mb-1">Overhaul applied</div>
+                <div className={`text-xs p-3 border rounded-md ${overhaulResult.ok ? "bg-emerald-500/10" : "bg-destructive/10"}`}>
+                  <div className={`font-medium mb-1 ${overhaulResult.ok ? "text-emerald-500" : "text-destructive"}`}>
+                    {overhaulResult.ok ? "Overhaul applied and verified" : "Overhaul was not applied"}
+                  </div>
                   <div className="text-muted-foreground">{overhaulResult.message}</div>
+                  {overhaulResult.content_source && <div className="mt-1 text-muted-foreground">Source: {overhaulResult.content_source}</div>}
+                  {overhaulResult.verification && (
+                    <div className="mt-1 text-muted-foreground">
+                      Saved markers: {overhaulResult.verification.rest_has_signals ? "yes" : "no"} · Live slot: {String(overhaulResult.verification.live_has_content_slot ?? "unknown")} · Live markers: {overhaulResult.verification.live_has_signals ? "yes" : "no"}
+                    </div>
+                  )}
                   <div className="mt-1 flex flex-wrap gap-1">
                     {overhaulResult.changes.map((c, i) => <Badge key={i} variant="secondary">{c}</Badge>)}
                   </div>

@@ -127,6 +127,69 @@ function injectJsonLd(html: string, jsonLd: any): { html: string; added: boolean
   return { html: `${html}\n${block}`, added: true };
 }
 
+function stripNonContent(html: string): string {
+  return html
+    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, "")
+    .replace(/<header\b[\s\S]*?<\/header>/gi, "")
+    .replace(/<footer\b[\s\S]*?<\/footer>/gi, "")
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, "")
+    .replace(/<aside\b[\s\S]*?<\/aside>/gi, "");
+}
+
+function textLength(html: string): number {
+  return html.replace(/<[^>]+>/g, " ").replace(/&[a-z0-9#]+;/gi, " ").replace(/\s+/g, " ").trim().length;
+}
+
+function findBalancedElement(html: string, tag: string, start: number): string {
+  const openClose = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+  openClose.lastIndex = start;
+  let depth = 0;
+  let first = -1;
+  let m: RegExpExecArray | null;
+  while ((m = openClose.exec(html))) {
+    const token = m[0];
+    const isClose = token.startsWith(`</`);
+    const selfClosing = /\/\s*>$/.test(token);
+    if (!isClose) {
+      if (depth === 0) first = m.index;
+      if (!selfClosing) depth++;
+    } else {
+      depth--;
+      if (depth === 0 && first >= 0) return html.slice(first, openClose.lastIndex);
+    }
+  }
+  return "";
+}
+
+function extractPublicPostContent(pageHtml: string): { html: string; source: string; wordish: number } {
+  const clean = stripNonContent(pageHtml);
+  const candidates: Array<{ source: string; html: string }> = [];
+  for (const match of clean.matchAll(/<(article|main)\b[^>]*>/gi)) {
+    const html = findBalancedElement(clean, match[1].toLowerCase(), match.index || 0);
+    if (html) candidates.push({ source: match[1].toLowerCase(), html });
+  }
+  const contentClass = /<div\b[^>]*class=(['"])[^'"]*(?:entry-content|post-content|wp-block-post-content|elementor-widget-theme-post-content|elementor-widget-text-editor)[^'"]*\1[^>]*>/gi;
+  for (const match of clean.matchAll(contentClass)) {
+    const html = findBalancedElement(clean, "div", match.index || 0);
+    if (html) candidates.push({ source: "content-container", html });
+  }
+  const best = candidates
+    .map((c) => ({ ...c, wordish: textLength(c.html) }))
+    .filter((c) => c.wordish > 700 && /<(p|h2|h3|ul|ol|table|figure)\b/i.test(c.html))
+    .sort((a, b) => b.wordish - a.wordish)[0];
+  return best || { html: "", source: "none", wordish: 0 };
+}
+
+function hasLiveContentSlot(pageHtml: string): boolean {
+  const clean = stripNonContent(pageHtml);
+  return /<(article|main)\b/i.test(clean) || /class=(['"])[^'"]*(entry-content|post-content|wp-block-post-content|elementor-widget-theme-post-content)[^'"]*\1/i.test(clean);
+}
+
+function containsAppliedSignal(html: string): boolean {
+  return /gutf-faq|gutf-bottom-line|gutf-overhaul-v1|gutf:intro|application\/ld\+json/i.test(html || "");
+}
+
 async function logEvent(postId: number, message: string, ok: boolean) {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -141,6 +204,33 @@ async function logEvent(postId: number, message: string, ok: boolean) {
       }),
     }).then((r) => r.text());
   } catch { /* */ }
+}
+
+async function backupPostContent(postId: number, runId: string | null, content: string, status?: string, dateGmt?: string) {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key || !content.trim()) return;
+  try {
+    await fetch(`${url}/rest/v1/wp_post_backups`, {
+      method: "POST",
+      headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({ post_id: postId, run_id: runId, content, status: status || null, date_gmt: dateGmt || null }),
+    }).then((r) => r.text());
+  } catch { /* best-effort */ }
+}
+
+function buildSeedContent(fixes: Record<string, any>): string {
+  const blocks: string[] = [];
+  const intro = typeof fixes.introHtml === "string" && fixes.introHtml.trim()
+    ? fixes.introHtml.trim()
+    : (typeof fixes.introParagraph === "string" && fixes.introParagraph.trim() ? `<p>${fixes.introParagraph.trim()}</p>` : "");
+  if (intro) blocks.push(`<!--gutf:intro-->${intro}<!--/gutf:intro-->`);
+  if (Array.isArray(fixes.h2Outline) && fixes.h2Outline.length) {
+    blocks.push(`<section class="gutf-outline"><h2>Recommended Content Structure</h2><ul>${fixes.h2Outline.map((h: unknown) => `<li>${String(h).replace(/[<>]/g, "")}</li>`).join("")}</ul></section>`);
+  }
+  if (typeof fixes.faqHtml === "string" && fixes.faqHtml.trim()) blocks.push(`<!--gutf:faq-->${fixes.faqHtml.trim()}<!--/gutf:faq-->`);
+  if (typeof fixes.conclusionHtml === "string" && fixes.conclusionHtml.trim()) blocks.push(`<!--gutf:bottom-line-->${fixes.conclusionHtml.trim()}<!--/gutf:bottom-line-->`);
+  return blocks.length ? `<div class="gutf-article gutf-generated-overhaul">\n${blocks.join("\n")}\n</div>` : "";
 }
 
 Deno.serve(async (req) => {
@@ -160,10 +250,10 @@ Deno.serve(async (req) => {
   if (!user || !pass) return jsonRes({ error: "WP credentials not configured" }, 500);
   const auth = "Basic " + btoa(`${user}:${pass}`);
 
-  // 1. Fetch raw content (context=edit). Fallback to context=view if raw is empty
-  // (happens when the app-password user lacks edit_posts cap on this post type).
+  // 1. Fetch editable content. Some Elementor/template posts legitimately return
+  // empty post_content; those must be detected instead of reported as "applied".
   async function fetchPost(ctx: "edit" | "view") {
-    const r = await fetch(`${WP_BASE}/posts/${postId}?context=${ctx}&_fields=id,title,excerpt,content,status`, {
+    const r = await fetch(`${WP_BASE}/posts/${postId}?context=${ctx}&_fields=id,link,title,excerpt,content,status,date_gmt`, {
       headers: { Authorization: auth, "User-Agent": "GearupAudit/3.0" },
     });
     return { ok: r.ok, status: r.status, body: r.ok ? await r.json() : await r.text() };
@@ -180,6 +270,9 @@ Deno.serve(async (req) => {
     (typeof post?.content?.raw === "string" && post.content.raw) ||
     (typeof post?.content?.rendered === "string" && post.content.rendered) ||
     "";
+  const originalRaw = raw;
+  let contentSource = raw.trim() ? (typeof post?.content?.raw === "string" && post.content.raw ? "rest_raw" : "rest_rendered") : "empty";
+  let publicPageHtml = "";
   // If raw is empty (edit context returned rendered-only blank), try view context which always returns rendered HTML
   if (!raw.trim()) {
     const g2 = await fetchPost("view");
@@ -189,28 +282,21 @@ Deno.serve(async (req) => {
         (typeof post?.content?.rendered === "string" && post.content.rendered) ||
         (typeof post?.content?.raw === "string" && post.content.raw) ||
         "";
+      if (raw.trim()) contentSource = typeof post?.content?.rendered === "string" && post.content.rendered ? "rest_view_rendered" : "rest_view_raw";
     }
   }
-  // Last-resort fallback: fetch the public post HTML from APEX and extract <article> / main content
+  // Last-resort fallback: extract visible article content from the public URL.
   if (!raw.trim()) {
     try {
       const link: string | undefined = post?.link;
       if (link) {
         const pageRes = await fetch(link, { headers: { "User-Agent": "GearupAudit/3.0", "Cache-Control": "no-cache" } });
         if (pageRes.ok) {
-          const pageHtml = await pageRes.text();
-          // Extract <article>...</article> or fall back to <main>
-          const articleMatch = pageHtml.match(/<article\b[\s\S]*?<\/article>/i);
-          const mainMatch = !articleMatch ? pageHtml.match(/<main\b[\s\S]*?<\/main>/i) : null;
-          const extracted = articleMatch?.[0] || mainMatch?.[0] || "";
-          // Strip script/style/header/footer/nav/aside to keep just content
-          if (extracted) {
-            raw = extracted
-              .replace(/<script\b[\s\S]*?<\/script>/gi, "")
-              .replace(/<style\b[\s\S]*?<\/style>/gi, "")
-              .replace(/<header\b[\s\S]*?<\/header>/gi, "")
-              .replace(/<footer\b[\s\S]*?<\/footer>/gi, "")
-              .replace(/<nav\b[\s\S]*?<\/nav>/gi, "");
+          publicPageHtml = await pageRes.text();
+          const extracted = extractPublicPostContent(publicPageHtml);
+          if (extracted.html) {
+            raw = extracted.html;
+            contentSource = `public_${extracted.source}`;
           }
         }
       }
@@ -218,18 +304,24 @@ Deno.serve(async (req) => {
   }
   if (!raw.trim()) {
     const diag = `status=${post?.status} hasContent=${!!post?.content} keys=${post?.content ? Object.keys(post.content).join(",") : "none"}`;
-    await logEvent(postId, `Skipped: empty content (${diag})`, true);
-    // Return 200 with skipped flag so the UI doesn't surface a runtime error / blank screen.
-    // This commonly happens when a post is built entirely by a page-builder (Elementor/Divi/Bricks)
-    // that stores HTML in post meta instead of post_content.
-    return jsonRes({
-      ok: true,
-      skipped: true,
-      post_id: postId,
-      changes: ["skipped-empty"],
-      reason: "page-builder-or-empty",
-      detail: `Post has no content in WP REST (${diag}). Likely built with a page-builder (Elementor/Divi/Bricks) that stores HTML outside post_content. Edit this post manually in WordPress.`,
-    });
+    const hasSlot = publicPageHtml ? hasLiveContentSlot(publicPageHtml) : false;
+    const seed = buildSeedContent(fixes);
+    if (!seed || !hasSlot) {
+      await logEvent(postId, `Blocked: empty editable content (${diag})`, false);
+      return jsonRes({
+        ok: false,
+        skipped: true,
+        post_id: postId,
+        changes: ["blocked-empty-content"],
+        reason: hasSlot ? "no-generated-content" : "no-editable-post-content",
+        message: hasSlot
+          ? "WordPress returned empty post content and there were no generated blocks to publish."
+          : "WordPress returned empty post content and the live page has no editable article content slot. This is likely an Elementor/template-only post.",
+        detail: `No live write was made. ${diag}.`,
+      }, 200);
+    }
+    raw = seed;
+    contentSource = "generated_seed_empty_rest";
   }
 
   // 2. Visual transforms
@@ -252,6 +344,8 @@ Deno.serve(async (req) => {
   }
 
   // 4. PUT update
+  const runId = crypto.randomUUID();
+  await backupPostContent(postId, runId, originalRaw || raw, post?.status, post?.date_gmt);
   const updateBody: Record<string, unknown> = { content: html };
   if (typeof fixes.metaTitle === "string" && fixes.metaTitle.trim()) updateBody.title = fixes.metaTitle.trim();
   if (typeof fixes.metaDescription === "string" && fixes.metaDescription.trim()) updateBody.excerpt = fixes.metaDescription.trim();
@@ -266,7 +360,33 @@ Deno.serve(async (req) => {
     await logEvent(postId, `Overhaul failed: ${updateRes.status} ${t.slice(0, 160)}`, false);
     return jsonRes({ ok: false, error: `Update ${updateRes.status}`, detail: t.slice(0, 240) }, 502);
   }
-  await updateRes.text();
-  await logEvent(postId, `Overhauled: ${changes.join(", ")}`, true);
-  return jsonRes({ ok: true, post_id: postId, changes, message: `Applied: ${changes.join(", ")}` });
+  const updatedText = await updateRes.text();
+  let updatedPost: any = {}; try { updatedPost = JSON.parse(updatedText); } catch { updatedPost = { raw: updatedText }; }
+
+  const verifyEdit = await fetchPost("edit");
+  const verifyBody: any = verifyEdit.ok ? verifyEdit.body : updatedPost;
+  const verifyContent = String(verifyBody?.content?.raw || verifyBody?.content?.rendered || "");
+  const restHasSignals = containsAppliedSignal(verifyContent);
+  let liveHasContentSlot: boolean | null = null;
+  let liveHasSignals = false;
+  try {
+    const link = String(updatedPost?.link || post?.link || "");
+    if (link) {
+      const liveRes = await fetch(`${link}${link.includes("?") ? "&" : "?"}_gutf_verify=${Date.now()}`, { headers: { "User-Agent": "GearupAudit/3.0", "Cache-Control": "no-cache" } });
+      if (liveRes.ok) {
+        const liveHtml = await liveRes.text();
+        liveHasContentSlot = hasLiveContentSlot(liveHtml);
+        liveHasSignals = containsAppliedSignal(liveHtml);
+      }
+    }
+  } catch { /* live verification is best-effort */ }
+
+  if (!restHasSignals) {
+    await logEvent(postId, `Overhaul write failed verification; rolled back required (${changes.join(", ")})`, false);
+    return jsonRes({ ok: false, post_id: postId, changes, message: "WordPress accepted the request, but the saved post content did not contain the overhaul markers. No reliable live change was confirmed.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals } }, 200);
+  }
+
+  const visible = liveHasContentSlot !== false || liveHasSignals;
+  await logEvent(postId, `Overhauled and verified: ${changes.join(", ")} (source=${contentSource})`, true);
+  return jsonRes({ ok: true, post_id: postId, changes, message: visible ? `Applied and verified: ${changes.join(", ")}` : "Saved to WordPress, but the live template does not appear to render post content. Check Elementor single-post template.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals } });
 });
