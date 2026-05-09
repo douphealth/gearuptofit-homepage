@@ -688,13 +688,13 @@ Deno.serve(async (req) => {
   const visual2 = applyVisualFixes(html); html = visual2.html; changes.push(...visual2.changes.map((c) => `post:${c}`));
 
   // Pre-publish gate: refuse to write a post that will look empty.
-  const bodyWords = htmlWordCount(html);
-  const bodyH2 = countTag(html, "h2");
-  if (bodyWords < 600 || bodyH2 < 3) {
+  let bodyWords = htmlWordCount(html);
+  let bodyH2 = countTag(html, "h2");
+  if (bodyWords < LIVE_MIN_VISIBLE_WORDS || bodyH2 < LIVE_MIN_VISIBLE_H2) {
     await logEvent(postId, `Refusing to publish empty-looking content: words=${bodyWords} h2=${bodyH2}`, false);
     return jsonRes({
       ok: false, post_id: postId, changes,
-      message: `Refused to publish: AI body content insufficient (words=${bodyWords}, h2 sections=${bodyH2}). Required: ≥600 words and ≥3 H2 sections. The AI Gateway likely returned a truncated response — retry the overhaul.`,
+      message: `Refused to publish: AI body content insufficient (words=${bodyWords}, h2 sections=${bodyH2}). Required: ≥${LIVE_MIN_VISIBLE_WORDS} words and ≥${LIVE_MIN_VISIBLE_H2} H2 sections. The AI Gateway likely returned a truncated response — retry the overhaul.`,
       content_source: contentSource, body_word_count: bodyWords, body_h2_count: bodyH2,
     }, 200);
   }
@@ -705,12 +705,19 @@ Deno.serve(async (req) => {
   // If html === raw but the existing live post has fewer than 600 words / 3 H2s
   // (e.g. KSES previously stripped the section bodies), we MUST re-publish so the
   // server re-receives the full content.
+  const publicUrl = canonicalPublicUrl(String(post?.link || ""));
   if (html === raw && (!fixes.metaTitle || fixes.metaTitle === post.title?.raw) && (!fixes.metaDescription || fixes.metaDescription === post.excerpt?.raw)) {
     const rawWords = htmlWordCount(raw);
     const rawH2 = countTag(raw, "h2");
-    if (rawWords >= 600 && rawH2 >= 3) {
-      await logEvent(postId, `No-op (already overhauled, raw body ${rawWords}w/${rawH2}h2)`, true);
-      return jsonRes({ ok: true, post_id: postId, changes: ["noop"], message: `Already fully overhauled (${rawWords} words · ${rawH2} H2 sections).` });
+    if (rawWords >= LIVE_MIN_VISIBLE_WORDS && rawH2 >= LIVE_MIN_VISIBLE_H2) {
+      const existingLive = publicUrl ? await verifyLiveVisibility(publicUrl, "", false, 2) : null;
+      if (existingLive?.live_body_ok) {
+        await logEvent(postId, `No-op verified live-visible (${existingLive.live_body_word_count}w/${existingLive.live_body_h2_count}h2)`, true);
+        return jsonRes({ ok: true, post_id: postId, changes: ["noop"], message: `Already fully overhauled and visibly live (${existingLive.live_body_word_count} words · ${existingLive.live_body_h2_count} H2 sections).`, content_source: contentSource, verification: { ...existingLive, rest_body_word_count: rawWords, rest_body_h2_count: rawH2, saved_status_publish: String(post?.status || "") === "publish" } });
+      }
+      html = buildStandaloneOverhaulHtml(enriched);
+      changes.push("live-visible-repair-republish");
+      contentSource = `${contentSource}+standalone_live_repair`;
     }
     // Force a re-injection by stripping the empty sections marker so the next pass rewrites it.
     html = html.replace(/<!--gutf:sections-->[\s\S]*?<!--\/gutf:sections-->/g, "");
@@ -719,6 +726,13 @@ Deno.serve(async (req) => {
       html = reinj.html;
       changes.push("forced-sections-rewrite");
     }
+  }
+
+  bodyWords = htmlWordCount(html);
+  bodyH2 = countTag(html, "h2");
+  if (bodyWords < LIVE_MIN_VISIBLE_WORDS || bodyH2 < LIVE_MIN_VISIBLE_H2) {
+    await logEvent(postId, `Refusing final publish after repair: words=${bodyWords} h2=${bodyH2}`, false);
+    return jsonRes({ ok: false, post_id: postId, changes, message: `Refused final publish: generated body is still too thin (${bodyWords} words · ${bodyH2} H2).`, content_source: contentSource, body_word_count: bodyWords, body_h2_count: bodyH2 }, 200);
   }
 
   // 4. PUT update
