@@ -365,7 +365,7 @@ async function fetchCleanWithCacheBypass(cleanUrl: string) {
       Cookie: `gutf_bust=${Date.now()}_${Math.random().toString(36).slice(2)}`,
     },
   });
-  return { ok: res.ok, status: res.status, html: await res.text().catch(() => ""), cf: res.headers.get("cf-cache-status") || null, age: res.headers.get("age") || null };
+  return { ok: res.ok, status: res.status, html: await readLimitedText(res), cf: res.headers.get("cf-cache-status") || null, age: res.headers.get("age") || null };
 }
 
 function runMarker(runId: string): string {
@@ -383,6 +383,38 @@ function containsRunMarker(html: string, runId: string): boolean {
 
 const LIVE_MIN_VISIBLE_WORDS = 600;
 const LIVE_MIN_VISIBLE_H2 = 3;
+const MAX_HTML_READ_BYTES = 700_000;
+
+async function readLimitedText(res: Response, maxBytes = MAX_HTML_READ_BYTES): Promise<string> {
+  if (!res.body) return await res.text().catch(() => "");
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { value, done } = await reader.read();
+      if (done || !value) break;
+      const remaining = maxBytes - total;
+      chunks.push(value.length > remaining ? value.slice(0, remaining) : value);
+      total += Math.min(value.length, remaining);
+      if (value.length > remaining) break;
+    }
+    if (total >= maxBytes) await reader.cancel().catch(() => undefined);
+  } catch {
+    await reader.cancel().catch(() => undefined);
+  }
+  return new TextDecoder().decode(concatChunks(chunks, total));
+}
+
+function concatChunks(chunks: Uint8Array[], total: number): Uint8Array {
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
 
 function stripInvisibleHtml(html: string): string {
   return String(html || "")
@@ -460,7 +492,7 @@ async function fetchLiveHtml(url: string, runId: string, attempt: number, cacheB
       Pragma: "no-cache",
     },
   });
-  return { ok: res.ok, status: res.status, url: cleanUrl, fetched_url: fetchUrl, html: res.ok ? await res.text() : await res.text().catch(() => "") };
+  return { ok: res.ok, status: res.status, url: cleanUrl, fetched_url: fetchUrl, html: await readLimitedText(res) };
 }
 
 async function verifyLiveVisibility(url: string, runId: string, exactRunRequired: boolean, attempts = 5, cacheBust = true) {
@@ -498,19 +530,19 @@ async function verifyLiveVisibility(url: string, runId: string, exactRunRequired
 async function verifyCanonicalAndBusted(url: string, runId: string, exactRunRequired: boolean, attempts = 5) {
   const canonicalUrl = cleanPublicUrl(url);
   // First confirm WordPress origin actually serves new content via cache-bust.
-  const busted = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, Math.max(2, Math.min(3, attempts)), true);
+  const busted = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, Math.max(1, Math.min(2, attempts)), true);
   let canonical = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, 1, false);
   const purges: any[] = [];
   let cfStatusFinal: string | null = null;
   let cfAgeFinal: string | null = null;
-  // Aggressive multi-round purge loop: purge → wait (exponential) → fetch CLEAN with cache-bypass headers → re-analyze.
-  // Up to 4 rounds with growing waits gives Cloudflare's edge time to converge globally.
-  for (let round = 1; round <= 4; round++) {
+  // Keep verification lightweight inside the Edge worker: one purge/check round is
+  // enough to prove the write while avoiding repeated full-page HTML downloads.
+  for (let round = 1; round <= 1; round++) {
     const okSoFar = canonical.live_body_ok && (!exactRunRequired || canonical.live_has_run_marker);
     if (okSoFar) break;
     const purge = await purgeCloudflareUrl(canonicalUrl, 2);
     purges.push({ round, ...purge });
-    await sleep(1500 * round + 1500); // 3s, 4.5s, 6s, 7.5s
+    await sleep(1200 * round);
     // Direct cache-bypass fetch on the CLEAN URL (no query params), then full analysis.
     try {
       const direct = await fetchCleanWithCacheBypass(canonicalUrl);
@@ -523,7 +555,7 @@ async function verifyCanonicalAndBusted(url: string, runId: string, exactRunRequ
       }
     } catch { /* */ }
     // Fallback: standard verify (some CDNs respect Cache-Control: no-cache from origin).
-    canonical = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, 2, false);
+    canonical = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, 1, false);
   }
   const purge = purges[purges.length - 1] || null;
   const canonicalOk = !!canonical.live_body_ok && (!exactRunRequired || !!canonical.live_has_run_marker);
@@ -957,10 +989,9 @@ Deno.serve(async (req) => {
   if (!postId) return jsonRes({ error: "post_id required" }, 400);
   const fixes = body.fixes || {};
   const dryRun = !!body.dry_run;
-  // Default OFF: the premium AI rewrite can exceed Edge runtime memory when the
-  // model returns a large article payload. The safe path applies caller fixes
-  // and local publishable fallbacks without loading a huge AI response.
-  const premiumQuality = body.premium_quality === true;
+  // Keep this function deterministic and memory-safe. AI generation happens in
+  // audit-generate-fixes; wp-overhaul only applies those fixes and local fallbacks.
+  const premiumQuality = false;
 
   const user = Deno.env.get("WP_USERNAME");
   const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
@@ -1009,7 +1040,7 @@ Deno.serve(async (req) => {
       if (link) {
         const pageRes = await fetch(link, { headers: { "User-Agent": "GearupAudit/3.0", "Cache-Control": "no-cache" } });
         if (pageRes.ok) {
-          publicPageHtml = await pageRes.text();
+          publicPageHtml = await readLimitedText(pageRes);
           const extracted = extractPublicPostContent(publicPageHtml);
           if (extracted.html) {
             raw = extracted.html;
@@ -1121,7 +1152,7 @@ Deno.serve(async (req) => {
   if (finalMetaTitle) updateBody.title = finalMetaTitle;
   if (finalMetaDesc) updateBody.excerpt = finalMetaDesc;
 
-  const updateRes = await fetch(`${WP_BASE}/posts/${postId}`, {
+  const updateRes = await fetch(`${WP_BASE}/posts/${postId}?_fields=id,link,status`, {
     method: "POST",
     headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/3.0" },
     body: JSON.stringify(updateBody),
