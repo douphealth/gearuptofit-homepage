@@ -319,7 +319,7 @@ async function verifyLiveVisibility(url: string, runId: string, exactRunRequired
       const exactOk = exactRunRequired ? last.live_has_run_marker : true;
       if (liveRes.ok && exactOk && last.live_body_ok) break;
     } catch (e) {
-      last = { ...last, live_attempts: attempt, live_error: String(e?.message || e) };
+      last = { ...last, live_attempts: attempt, live_error: String((e as any)?.message || e) };
     }
     await sleep(900 * attempt);
   }
