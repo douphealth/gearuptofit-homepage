@@ -311,7 +311,8 @@ async function generatePremiumContent(post: any, existingRaw: string, providedFi
 Your job: produce a #1-ranking, EEAT-grade, semantically rich, FULL-LENGTH blog post body.
 
 CRITICAL CONTENT REQUIREMENTS — non-negotiable:
-- sectionsHtml MUST contain at least ${MIN_BODY_H2} <section> blocks, each with one <h2> headline and 2-5 well-developed <p> paragraphs (plus optional <h3>, <ul>/<ol>, <table class="gutf-comparison">).
+- sectionsHtml MUST contain at least ${MIN_BODY_H2} <div class="gutf-section"> blocks, each with one <h2> headline and 2-5 well-developed <p> paragraphs (plus optional <h3>, <ul>/<ol>, <table class="gutf-comparison">).
+- DO NOT use <section>, <article>, <header>, <footer>, <aside> — WordPress KSES sanitizer strips them. Use <div class="gutf-section"> instead.
 - Total visible prose across sectionsHtml MUST be at least ${MIN_BODY_WORDS} words.
 - Cover the topic exhaustively — methodology, science, mistakes, programming, examples, comparisons, FAQ-adjacent depth.
 - Integrate semanticKeywords and entities naturally throughout the body.
@@ -325,12 +326,12 @@ Output STRICT JSON ONLY (no markdown fences). Schema:
   "semanticKeywords": string[] (12-20 LSI/related terms),
   "entities": string[] (8-15 named entities),
   "introHtml": string (1 punchy <p> with primary keyword in first sentence + 1 <p> stating user benefit; 60-110 words),
-  "sectionsHtml": string (the FULL article body — 5-8 <section> blocks meeting the requirements above),
-  "faqHtml": string (<section class="gutf-faq"><h2>Frequently Asked Questions</h2> 5-7 <div class="gutf-faq-item"><h3>Q</h3><p>A</p></div></section>),
+  "sectionsHtml": string (the FULL article body — 5-8 <div class="gutf-section"> blocks meeting the requirements above),
+  "faqHtml": string (<div class="gutf-faq"><h2>Frequently Asked Questions</h2> 5-7 <div class="gutf-faq-item"><h3>Q</h3><p>A</p></div></div>),
   "conclusionHtml": string (<div class="gutf-bottom-line"><h2>Bottom Line</h2><p>...</p></div>, 70-120 words),
   "jsonLd": object (schema.org Article + FAQPage @graph)
 }
-- HTML must be valid, semantic, mobile-friendly, NO inline width/height pixel styles, NO <script>, NO <style>.`;
+- HTML must be valid, semantic, mobile-friendly, NO inline width/height pixel styles, NO <script>, NO <style>, NO <section>/<article>/<header>/<footer>/<aside>.`;
 
   const usr = `TITLE: ${title}
 URL: ${link}
@@ -381,15 +382,46 @@ Return the JSON now. Remember: sectionsHtml must be the full ${MIN_BODY_WORDS}+ 
   return { ...lastAi, ...(providedFixes || {}) };
 }
 
-function injectSections(html: string, sectionsHtml: string): { html: string; added: boolean } {
-  if (!sectionsHtml || html.includes("<!--gutf:sections-->")) return { html, added: false };
-  // Insert after intro marker if present, else after responsive CSS, else prepend
+// WordPress KSES strips <section>, <article>, <header>, <footer>, <aside> for users
+// without `unfiltered_html` capability (Application Passwords NEVER have it).
+// Convert every semantic block element to a div with the same class so the body
+// actually survives the REST update.
+function ksesSafe(html: string): string {
+  if (!html) return html;
+  return String(html)
+    .replace(/<section\b/gi, '<div data-gutf-section="1"')
+    .replace(/<\/section>/gi, "</div>")
+    .replace(/<article\b/gi, '<div data-gutf-article="1"')
+    .replace(/<\/article>/gi, "</div>");
+}
+
+function extractBetween(html: string, openMarker: string, closeMarker: string): { before: string; inner: string; after: string; found: boolean } {
+  const a = html.indexOf(openMarker);
+  if (a < 0) return { before: html, inner: "", after: "", found: false };
+  const b = html.indexOf(closeMarker, a + openMarker.length);
+  if (b < 0) return { before: html, inner: "", after: "", found: false };
+  return { before: html.slice(0, a), inner: html.slice(a + openMarker.length, b), after: html.slice(b + closeMarker.length), found: true };
+}
+
+function injectOrReplaceSections(html: string, sectionsHtml: string): { html: string; added: boolean; replaced: boolean } {
+  if (!sectionsHtml) return { html, added: false, replaced: false };
+  const safe = ksesSafe(sectionsHtml);
+  const block = `\n<!--gutf:sections-->${safe}<!--/gutf:sections-->\n`;
+  const ex = extractBetween(html, "<!--gutf:sections-->", "<!--/gutf:sections-->");
+  if (ex.found) {
+    const innerWords = htmlWordCount(ex.inner);
+    const innerH2 = countTag(ex.inner, "h2");
+    // If existing body was wiped by KSES (or otherwise too thin), replace it.
+    if (innerWords < 600 || innerH2 < 3) {
+      return { html: `${ex.before}${block}${ex.after}`, added: false, replaced: true };
+    }
+    return { html, added: false, replaced: false };
+  }
   const introClose = "<!--/gutf:intro-->";
-  const block = `\n<!--gutf:sections-->${sectionsHtml}<!--/gutf:sections-->\n`;
-  if (html.includes(introClose)) return { html: html.replace(introClose, introClose + block), added: true };
+  if (html.includes(introClose)) return { html: html.replace(introClose, introClose + block), added: true, replaced: false };
   const cssIdx = html.indexOf("</style>");
-  if (cssIdx >= 0) return { html: html.slice(0, cssIdx + 8) + block + html.slice(cssIdx + 8), added: true };
-  return { html: block + html, added: true };
+  if (cssIdx >= 0) return { html: html.slice(0, cssIdx + 8) + block + html.slice(cssIdx + 8), added: true, replaced: false };
+  return { html: block + html, added: true, replaced: false };
 }
 
 function visualValidate(liveHtml: string): { score: number; checks: Record<string, boolean | number>; issues: string[] } {
@@ -520,17 +552,30 @@ Deno.serve(async (req) => {
 
 
   // 1b. Premium AI generation (SOTA, semantic, outranking content) — merged with caller fixes.
-  const enriched = premiumQuality ? await generatePremiumContent(post, raw, fixes) : (fixes || {});
+  const enrichedRaw = premiumQuality ? await generatePremiumContent(post, raw, fixes) : (fixes || {});
+  // KSES sanitization: strip <section>/<article> from any AI/caller HTML so the body
+  // actually survives the WordPress REST update (Application Passwords lack unfiltered_html).
+  const enriched: Record<string, any> = {
+    ...enrichedRaw,
+    introHtml: ksesSafe(enrichedRaw.introHtml || ""),
+    sectionsHtml: ksesSafe(enrichedRaw.sectionsHtml || ""),
+    faqHtml: ksesSafe(enrichedRaw.faqHtml || ""),
+    conclusionHtml: ksesSafe(enrichedRaw.conclusionHtml || ""),
+  };
 
-  // 2. Visual transforms
-  const visual = applyVisualFixes(raw);
+  // 2. Visual transforms — also strip leftover <section>/<article> from existing raw,
+  // so an old post that had its body stripped by KSES gets fully rewritten.
+  const visual = applyVisualFixes(ksesSafe(raw));
   let html = visual.html;
   const changes: string[] = [...visual.changes];
 
   // 3. Inject blocks (responsive CSS first so it sits above content)
   const css = ensureResponsiveCss(html); html = css.html; if (css.added) changes.push("responsive-css");
   const intro = injectIntro(html, enriched.introHtml); html = intro.html; if (intro.added) changes.push("intro");
-  const sections = injectSections(html, enriched.sectionsHtml); html = sections.html; if (sections.added) changes.push("premium-sections");
+  const sections = injectOrReplaceSections(html, enriched.sectionsHtml);
+  html = sections.html;
+  if (sections.added) changes.push("premium-sections");
+  if (sections.replaced) changes.push("premium-sections-replaced");
   const concl = injectConclusion(html, enriched.conclusionHtml); html = concl.html; if (concl.added) changes.push("conclusion");
   const faq = injectFaq(html, enriched.faqHtml); html = faq.html; if (faq.added) changes.push("faq");
   const ld = injectJsonLd(html, enriched.jsonLd); html = ld.html; if (ld.added) changes.push("jsonld");
@@ -551,9 +596,24 @@ Deno.serve(async (req) => {
 
   if (dryRun) return jsonRes({ ok: true, dry_run: true, changes, preview: html.slice(0, 4000), body_word_count: bodyWords, body_h2_count: bodyH2 });
 
+  // Idempotency: only treat as no-op when the live page ALSO renders a substantial body.
+  // If html === raw but the existing live post has fewer than 600 words / 3 H2s
+  // (e.g. KSES previously stripped the section bodies), we MUST re-publish so the
+  // server re-receives the full content.
   if (html === raw && (!fixes.metaTitle || fixes.metaTitle === post.title?.raw) && (!fixes.metaDescription || fixes.metaDescription === post.excerpt?.raw)) {
-    await logEvent(postId, "No-op (already overhauled)", true);
-    return jsonRes({ ok: true, post_id: postId, changes: ["noop"], message: "Already fully overhauled (idempotent)." });
+    const rawWords = htmlWordCount(raw);
+    const rawH2 = countTag(raw, "h2");
+    if (rawWords >= 600 && rawH2 >= 3) {
+      await logEvent(postId, `No-op (already overhauled, raw body ${rawWords}w/${rawH2}h2)`, true);
+      return jsonRes({ ok: true, post_id: postId, changes: ["noop"], message: `Already fully overhauled (${rawWords} words · ${rawH2} H2 sections).` });
+    }
+    // Force a re-injection by stripping the empty sections marker so the next pass rewrites it.
+    html = html.replace(/<!--gutf:sections-->[\s\S]*?<!--\/gutf:sections-->/g, "");
+    if (enriched.sectionsHtml) {
+      const reinj = injectOrReplaceSections(html, enriched.sectionsHtml);
+      html = reinj.html;
+      changes.push("forced-sections-rewrite");
+    }
   }
 
   // 4. PUT update
