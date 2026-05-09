@@ -282,6 +282,7 @@ Deno.serve(async (req) => {
         (typeof post?.content?.rendered === "string" && post.content.rendered) ||
         (typeof post?.content?.raw === "string" && post.content.raw) ||
         "";
+      if (raw.trim()) contentSource = typeof post?.content?.rendered === "string" && post.content.rendered ? "rest_view_rendered" : "rest_view_raw";
     }
   }
   // Last-resort fallback: extract visible article content from the public URL.
