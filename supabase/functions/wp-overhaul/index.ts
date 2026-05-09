@@ -215,6 +215,70 @@ function containsRunMarker(html: string, runId: string): boolean {
   return !!runId && String(html || "").includes(runMarker(runId));
 }
 
+const LIVE_MIN_VISIBLE_WORDS = 600;
+const LIVE_MIN_VISIBLE_H2 = 3;
+
+function stripInvisibleHtml(html: string): string {
+  return String(html || "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|noscript|svg)\b[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+\b(?:hidden|aria-hidden=(['"])true\1)[^>]*>[\s\S]*?<\/[^>]+>/gi, " ")
+    .replace(/<[^>]+style=(['"])[^'"]*(?:display\s*:\s*none|visibility\s*:\s*hidden)[^'"]*\1[^>]*>[\s\S]*?<\/[^>]+>/gi, " ");
+}
+
+function sampleH2(html: string): string[] {
+  return Array.from(String(html || "").matchAll(/<h2\b[^>]*>([\s\S]*?)<\/h2>/gi))
+    .map((m) => stripTags(m[1]).slice(0, 120))
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function analyzeLiveVisibility(pageHtml: string, runId: string, exactRunRequired: boolean) {
+  const rawPage = String(pageHtml || "");
+  const clean = stripInvisibleHtml(stripNonContent(pageHtml));
+  const candidates: Array<{ source: string; html: string; priority: number }> = [];
+  const contentClass = /<div\b[^>]*class=(['"])[^'"]*(?:entry-content|post-content|wp-block-post-content|elementor-widget-theme-post-content|elementor-widget-text-editor|gutf-article)[^'"]*\1[^>]*>/gi;
+  for (const match of clean.matchAll(contentClass)) {
+    const html = findBalancedElement(clean, "div", match.index || 0);
+    if (html) candidates.push({ source: "content-container", html, priority: 4000 });
+  }
+  for (const match of clean.matchAll(/<(article|main)\b[^>]*>/gi)) {
+    const tag = match[1].toLowerCase();
+    const html = findBalancedElement(clean, tag, match.index || 0);
+    if (html) candidates.push({ source: tag, html, priority: tag === "article" ? 2500 : 1800 });
+  }
+  candidates.push({ source: "full-page-fallback", html: clean, priority: 0 });
+
+  const scored = candidates.map((c) => {
+    const hasRunMarker = containsRunMarker(c.html, runId);
+    const hasSignals = containsAppliedSignal(c.html);
+    const words = htmlWordCount(c.html);
+    const h2 = countTag(c.html, "h2");
+    const score = (hasRunMarker ? 1_000_000 : 0) + (hasSignals ? 250_000 : 0) + c.priority + (h2 * 500) + words;
+    return { ...c, hasRunMarker, hasSignals, words, h2, score };
+  });
+  const best = scored.sort((a, b) => b.score - a.score)[0] || scored[0];
+  const text = stripTags(best?.html || "").slice(0, 600);
+  const fullHasRunMarker = containsRunMarker(rawPage, runId);
+  const fullHasSignals = containsAppliedSignal(clean);
+  const visibleZoneOk = !!best && best.source !== "full-page-fallback";
+  return {
+    live_has_content_slot: hasLiveContentSlot(clean),
+    live_has_signals: fullHasSignals,
+    live_has_run_marker: fullHasRunMarker,
+    live_body_word_count: best?.words || 0,
+    live_body_h2_count: best?.h2 || 0,
+    live_body_ok: visibleZoneOk && (!exactRunRequired || fullHasRunMarker) && (best?.words || 0) >= LIVE_MIN_VISIBLE_WORDS && (best?.h2 || 0) >= LIVE_MIN_VISIBLE_H2,
+    live_content_source: best?.source || "none",
+    live_selected_html_bytes: (best?.html || "").length,
+    live_heading_samples: sampleH2(best?.html || ""),
+    live_text_sample: text,
+    live_min_word_count: LIVE_MIN_VISIBLE_WORDS,
+    live_min_h2_count: LIVE_MIN_VISIBLE_H2,
+    live_exact_run_required: exactRunRequired,
+  };
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -229,7 +293,38 @@ async function fetchLiveHtml(url: string, runId: string, attempt: number) {
       Pragma: "no-cache",
     },
   });
-  return { ok: res.ok, status: res.status, url, html: res.ok ? await res.text() : await res.text().catch(() => "") };
+  return { ok: res.ok, status: res.status, url, fetched_url: verifyUrl, html: res.ok ? await res.text() : await res.text().catch(() => "") };
+}
+
+async function verifyLiveVisibility(url: string, runId: string, exactRunRequired: boolean, attempts = 5) {
+  let last: any = {
+    live_url: url,
+    live_status: null,
+    live_body_word_count: 0,
+    live_body_h2_count: 0,
+    live_body_ok: false,
+    live_has_content_slot: null,
+    live_has_signals: false,
+    live_has_run_marker: false,
+    live_content_source: "not-fetched",
+    live_min_word_count: LIVE_MIN_VISIBLE_WORDS,
+    live_min_h2_count: LIVE_MIN_VISIBLE_H2,
+    live_exact_run_required: exactRunRequired,
+    live_attempts: 0,
+  };
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const liveRes = await fetchLiveHtml(url, runId || `existing_${crypto.randomUUID()}`, attempt);
+      const analysis = liveRes.ok ? analyzeLiveVisibility(liveRes.html, runId, exactRunRequired) : {};
+      last = { ...last, ...analysis, live_url: url, live_fetched_url: liveRes.fetched_url, live_status: liveRes.status, live_attempts: attempt, live_visual_report: liveRes.ok ? visualValidate(liveRes.html) : null };
+      const exactOk = exactRunRequired ? last.live_has_run_marker : true;
+      if (liveRes.ok && exactOk && last.live_body_ok) break;
+    } catch (e) {
+      last = { ...last, live_attempts: attempt, live_error: String((e as any)?.message || e) };
+    }
+    await sleep(900 * attempt);
+  }
+  return last;
 }
 
 async function logEvent(postId: number, message: string, ok: boolean) {
@@ -424,6 +519,17 @@ function injectOrReplaceSections(html: string, sectionsHtml: string): { html: st
   return { html: block + html, added: true, replaced: false };
 }
 
+function buildStandaloneOverhaulHtml(enriched: Record<string, any>): string {
+  let html = `${RESPONSIVE_CSS}\n<div class="gutf-article gutf-generated-overhaul gutf-live-repair">\n`;
+  if (enriched.introHtml) html += `<!--gutf:intro-->${ksesSafe(enriched.introHtml)}<!--/gutf:intro-->\n`;
+  if (enriched.sectionsHtml) html += `<!--gutf:sections-->${ksesSafe(enriched.sectionsHtml)}<!--/gutf:sections-->\n`;
+  if (enriched.conclusionHtml) html += `<!--gutf:bottom-line-->${ksesSafe(enriched.conclusionHtml)}<!--/gutf:bottom-line-->\n`;
+  if (enriched.faqHtml) html += `<!--gutf:faq-->${ksesSafe(enriched.faqHtml)}<!--/gutf:faq-->\n`;
+  html += `</div>`;
+  const ld = injectJsonLd(html, enriched.jsonLd);
+  return ld.html;
+}
+
 function visualValidate(liveHtml: string): { score: number; checks: Record<string, boolean | number>; issues: string[] } {
   const issues: string[] = [];
   const checks: Record<string, boolean | number> = {};
@@ -583,13 +689,13 @@ Deno.serve(async (req) => {
   const visual2 = applyVisualFixes(html); html = visual2.html; changes.push(...visual2.changes.map((c) => `post:${c}`));
 
   // Pre-publish gate: refuse to write a post that will look empty.
-  const bodyWords = htmlWordCount(html);
-  const bodyH2 = countTag(html, "h2");
-  if (bodyWords < 600 || bodyH2 < 3) {
+  let bodyWords = htmlWordCount(html);
+  let bodyH2 = countTag(html, "h2");
+  if (bodyWords < LIVE_MIN_VISIBLE_WORDS || bodyH2 < LIVE_MIN_VISIBLE_H2) {
     await logEvent(postId, `Refusing to publish empty-looking content: words=${bodyWords} h2=${bodyH2}`, false);
     return jsonRes({
       ok: false, post_id: postId, changes,
-      message: `Refused to publish: AI body content insufficient (words=${bodyWords}, h2 sections=${bodyH2}). Required: ≥600 words and ≥3 H2 sections. The AI Gateway likely returned a truncated response — retry the overhaul.`,
+      message: `Refused to publish: AI body content insufficient (words=${bodyWords}, h2 sections=${bodyH2}). Required: ≥${LIVE_MIN_VISIBLE_WORDS} words and ≥${LIVE_MIN_VISIBLE_H2} H2 sections. The AI Gateway likely returned a truncated response — retry the overhaul.`,
       content_source: contentSource, body_word_count: bodyWords, body_h2_count: bodyH2,
     }, 200);
   }
@@ -600,12 +706,19 @@ Deno.serve(async (req) => {
   // If html === raw but the existing live post has fewer than 600 words / 3 H2s
   // (e.g. KSES previously stripped the section bodies), we MUST re-publish so the
   // server re-receives the full content.
+  const publicUrl = canonicalPublicUrl(String(post?.link || ""));
   if (html === raw && (!fixes.metaTitle || fixes.metaTitle === post.title?.raw) && (!fixes.metaDescription || fixes.metaDescription === post.excerpt?.raw)) {
     const rawWords = htmlWordCount(raw);
     const rawH2 = countTag(raw, "h2");
-    if (rawWords >= 600 && rawH2 >= 3) {
-      await logEvent(postId, `No-op (already overhauled, raw body ${rawWords}w/${rawH2}h2)`, true);
-      return jsonRes({ ok: true, post_id: postId, changes: ["noop"], message: `Already fully overhauled (${rawWords} words · ${rawH2} H2 sections).` });
+    if (rawWords >= LIVE_MIN_VISIBLE_WORDS && rawH2 >= LIVE_MIN_VISIBLE_H2) {
+      const existingLive = publicUrl ? await verifyLiveVisibility(publicUrl, "", false, 2) : null;
+      if (existingLive?.live_body_ok) {
+        await logEvent(postId, `No-op verified live-visible (${existingLive.live_body_word_count}w/${existingLive.live_body_h2_count}h2)`, true);
+        return jsonRes({ ok: true, post_id: postId, changes: ["noop"], message: `Already fully overhauled and visibly live (${existingLive.live_body_word_count} words · ${existingLive.live_body_h2_count} H2 sections).`, content_source: contentSource, verification: { ...existingLive, rest_body_word_count: rawWords, rest_body_h2_count: rawH2, saved_status_publish: String(post?.status || "") === "publish" } });
+      }
+      html = buildStandaloneOverhaulHtml(enriched);
+      changes.push("live-visible-repair-republish");
+      contentSource = `${contentSource}+standalone_live_repair`;
     }
     // Force a re-injection by stripping the empty sections marker so the next pass rewrites it.
     html = html.replace(/<!--gutf:sections-->[\s\S]*?<!--\/gutf:sections-->/g, "");
@@ -614,6 +727,13 @@ Deno.serve(async (req) => {
       html = reinj.html;
       changes.push("forced-sections-rewrite");
     }
+  }
+
+  bodyWords = htmlWordCount(html);
+  bodyH2 = countTag(html, "h2");
+  if (bodyWords < LIVE_MIN_VISIBLE_WORDS || bodyH2 < LIVE_MIN_VISIBLE_H2) {
+    await logEvent(postId, `Refusing final publish after repair: words=${bodyWords} h2=${bodyH2}`, false);
+    return jsonRes({ ok: false, post_id: postId, changes, message: `Refused final publish: generated body is still too thin (${bodyWords} words · ${bodyH2} H2).`, content_source: contentSource, body_word_count: bodyWords, body_h2_count: bodyH2 }, 200);
   }
 
   // 4. PUT update
@@ -648,52 +768,19 @@ Deno.serve(async (req) => {
   const restBodyWords = htmlWordCount(verifyContent);
   const restBodyH2 = countTag(verifyContent, "h2");
   const savedPublished = String(verifyBody?.status || updatedPost?.status || "") === "publish";
-  let liveHasContentSlot: boolean | null = null;
-  let liveHasSignals = false;
-  let liveHasRunMarker = false;
-  let liveStatus: number | null = null;
-  let liveBodyWords = 0;
-  let liveBodyH2 = 0;
   let liveUrl = canonicalPublicUrl(String(updatedPost?.link || post?.link || ""));
-  let visualReport: { score: number; checks: Record<string, boolean | number>; issues: string[] } | null = null;
-  if (liveUrl) {
-    for (let attempt = 1; attempt <= 4; attempt++) {
-      try {
-        const liveRes = await fetchLiveHtml(liveUrl, runId, attempt);
-        liveStatus = liveRes.status;
-        if (liveRes.ok) {
-          const liveHtml = liveRes.html;
-          liveHasContentSlot = hasLiveContentSlot(liveHtml);
-          liveHasSignals = containsAppliedSignal(liveHtml);
-          liveHasRunMarker = containsRunMarker(liveHtml, runId);
-          const articleZone = (() => {
-            const idx = liveHtml.search(/<(article|main)\b/i);
-            if (idx < 0) return liveHtml;
-            const tag = (liveHtml.slice(idx).match(/<(article|main)\b/i) || ["", "article"])[1].toLowerCase();
-            return findBalancedElement(liveHtml, tag, idx) || liveHtml;
-          })();
-          const articleClean = stripNonContent(articleZone);
-          liveBodyWords = htmlWordCount(articleClean);
-          liveBodyH2 = countTag(articleClean, "h2");
-          visualReport = visualValidate(articleZone);
-          if (liveHasRunMarker && liveBodyWords >= 600 && liveBodyH2 >= 3) break;
-        }
-      } catch { /* retry below */ }
-      await sleep(900 * attempt);
-    }
-  }
-
-  const liveBodyOk = liveBodyWords >= 600 && liveBodyH2 >= 3;
-  const verification = { rest_has_signals: restHasSignals, rest_has_run_marker: restHasRunMarker, rest_body_word_count: restBodyWords, rest_body_h2_count: restBodyH2, saved_status_publish: savedPublished, live_url: liveUrl, live_status: liveStatus, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals, live_has_run_marker: liveHasRunMarker, live_body_word_count: liveBodyWords, live_body_h2_count: liveBodyH2, live_body_ok: liveBodyOk, run_marker: marker };
-  if (!savedPublished || !restHasSignals || !restHasRunMarker || !liveHasRunMarker || !liveBodyOk) {
-    const reason = !liveBodyOk && liveHasRunMarker
-      ? `Live page renders the run marker but the visible article body is too thin (words=${liveBodyWords}, h2=${liveBodyH2}). Reader will see a near-empty post. Likely cause: WordPress KSES stripped <section> tags, an Elementor/page-builder template overrides post_content, or CDN cache is serving an older render.`
-      : (liveHasRunMarker ? "WordPress saved the overhaul, but publish status verification failed." : "WordPress accepted the update, but the public live post did not show this exact publish run after cache-busted re-fetch. Treating as NOT published/visible.");
-    await logEvent(postId, `Overhaul not live-verified; saved=${savedPublished} rest_marker=${restHasRunMarker} live_marker=${liveHasRunMarker} body_ok=${liveBodyOk} live_words=${liveBodyWords} live_h2=${liveBodyH2} (${changes.join(", ")})`, false);
+  const liveCheck = liveUrl ? await verifyLiveVisibility(liveUrl, runId, true, 5) : null;
+  const visualReport = liveCheck?.live_visual_report || null;
+  const verification = { rest_has_signals: restHasSignals, rest_has_run_marker: restHasRunMarker, rest_body_word_count: restBodyWords, rest_body_h2_count: restBodyH2, saved_status_publish: savedPublished, run_marker: marker, ...(liveCheck || { live_url: liveUrl, live_status: null, live_body_word_count: 0, live_body_h2_count: 0, live_body_ok: false, live_has_run_marker: false, live_has_signals: false, live_has_content_slot: null, live_min_word_count: LIVE_MIN_VISIBLE_WORDS, live_min_h2_count: LIVE_MIN_VISIBLE_H2 }) };
+  if (!savedPublished || !restHasSignals || !restHasRunMarker || !verification.live_has_run_marker || !verification.live_body_ok) {
+    const reason = !verification.live_body_ok && verification.live_has_run_marker
+      ? `Live page renders the exact publish run marker but the visible article body is too thin (words=${verification.live_body_word_count}, h2=${verification.live_body_h2_count}; required ≥${LIVE_MIN_VISIBLE_WORDS} words and ≥${LIVE_MIN_VISIBLE_H2} H2). Reader will see a near-empty post.`
+      : (verification.live_has_run_marker ? "WordPress saved the overhaul, but publish status verification failed." : "WordPress accepted the update, but the public live post did not show this exact publish run after cache-busted re-fetch. Treating as NOT published/visible.");
+    await logEvent(postId, `Overhaul not live-verified; saved=${savedPublished} rest_marker=${restHasRunMarker} live_marker=${verification.live_has_run_marker} body_ok=${verification.live_body_ok} live_words=${verification.live_body_word_count} live_h2=${verification.live_body_h2_count} source=${verification.live_content_source} (${changes.join(", ")})`, false);
     return jsonRes({ ok: false, post_id: postId, changes, message: reason, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } }, 200);
   }
 
   const visualScore = visualReport?.score ?? null;
-  await logEvent(postId, `Overhauled and public-live verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"}; body=${liveBodyWords}w/${liveBodyH2}h2; ${marker})`, true);
-  return jsonRes({ ok: true, post_id: postId, changes, message: `Applied, published, and verified (${liveBodyWords} words · ${liveBodyH2} H2 sections · visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}`, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
+  await logEvent(postId, `Overhauled and public-live verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"}; body=${verification.live_body_word_count}w/${verification.live_body_h2_count}h2; selected=${verification.live_content_source}; ${marker})`, true);
+  return jsonRes({ ok: true, post_id: postId, changes, message: `Applied, published, and verified (${verification.live_body_word_count} visible words · ${verification.live_body_h2_count} visible H2 sections · visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}`, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
 });
