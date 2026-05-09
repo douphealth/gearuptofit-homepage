@@ -780,10 +780,10 @@ Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible word
       const txt = String(data?.choices?.[0]?.message?.content || "{}");
       // @ts-ignore release reference
       (data as any).choices = null;
-      const ai = JSON.parse(txt.replace(/^```json\s*|\s*```$/g, ""));
+      const ai = ensureMinimumInternalLinks(JSON.parse(txt.replace(/^```json\s*|\s*```$/g, "")), candidates, MIN_INTERNAL_LINKS);
       const wc = htmlWordCount(ai.sectionsHtml || "");
       const h2c = countTag(ai.sectionsHtml || "", "h2");
-      const lc = ((ai.sectionsHtml || "") + (ai.faqHtml || "")).match(/<a\b[^>]*href=["']https:\/\/gearuptofit\.com/gi)?.length || 0;
+      const lc = countInternalLinks(`${ai.sectionsHtml || ""}\n${ai.faqHtml || ""}`);
       console.log(`AI attempt ${attempt}: words=${wc}, h2=${h2c}, internal_links=${lc}`);
       lastAi = ai;
       lastWc = wc; lastH2 = h2c; lastLc = lc;
@@ -794,7 +794,7 @@ Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible word
       console.error("AI gen exception", attempt, e);
     }
   }
-  return { ...lastAi, _internalLinkCandidates: candidates, ...(providedFixes || {}) };
+  return { ...ensureMinimumInternalLinks(lastAi, candidates, MIN_INTERNAL_LINKS), _internalLinkCandidates: candidates, ...(providedFixes || {}) };
 }
 
 // WordPress KSES strips <section>, <article>, <header>, <footer>, <aside> for users
