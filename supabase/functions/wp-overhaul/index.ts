@@ -246,6 +246,115 @@ function stripTags(value: unknown): string {
   return String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+async function generatePremiumContent(post: any, existingRaw: string, providedFixes: Record<string, any>): Promise<Record<string, any>> {
+  const apiKey = Deno.env.get("LOVABLE_API_KEY");
+  if (!apiKey) return providedFixes || {};
+  const title = stripTags(post?.title?.raw || post?.title?.rendered || "");
+  const excerpt = stripTags(post?.excerpt?.raw || post?.excerpt?.rendered || "");
+  const link = String(post?.link || "");
+  const sourceText = stripTags(existingRaw).slice(0, 8000);
+  const sys = `You are a world-class SEO editor and copywriter for gearuptofit.com (fitness, training, gear, nutrition).
+Your job: produce a #1-ranking, EEAT-grade, semantically rich blog post body.
+
+Rules:
+- Output STRICT JSON ONLY (no markdown fences). Schema:
+  {
+    "metaTitle": string (<=60 chars, primary keyword first),
+    "metaDescription": string (<=158 chars, compelling, includes primary keyword),
+    "primaryKeyword": string,
+    "semanticKeywords": string[] (12-20 LSI/related terms),
+    "entities": string[] (8-15 named entities relevant to topic),
+    "introHtml": string (1 punchy <p> with primary keyword in first sentence + 1 <p> stating user benefit; 60-110 words total),
+    "sectionsHtml": string (5-8 <section> blocks, each with one <h2>, optional <h3>, well-formed <p>, <ul>/<ol> where useful, <table class=\"gutf-comparison\"> when comparison is helpful, semantic HTML only; no inline styles; cover the topic exhaustively to outrank competitors; integrate semanticKeywords and entities naturally),
+    "faqHtml": string (<section class=\"gutf-faq\"><h2>Frequently Asked Questions</h2> 5-7 <div class=\"gutf-faq-item\"><h3>Q</h3><p>A</p></div>),
+    "conclusionHtml": string (<div class=\"gutf-bottom-line\"><h2>Bottom Line</h2><p>...</p></div>, 70-120 words, with a clear takeaway),
+    "jsonLd": object (schema.org Article + FAQPage combined as @graph)
+  }
+- HTML must be valid, semantic, mobile-friendly, NO inline width/height pixel styles, NO <script>, NO <style>.
+- Tone: confident, expert, evidence-aware, concise. No fluff. No AI disclaimers.
+- Outrank competitors by being more comprehensive, specific, and useful.`;
+
+  const usr = `TITLE: ${title}
+URL: ${link}
+EXCERPT: ${excerpt}
+
+EXISTING CONTENT (may be empty or thin — rewrite/expand to be the best on the web):
+${sourceText}
+
+Return the JSON now.`;
+
+  try {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-pro",
+        messages: [{ role: "system", content: sys }, { role: "user", content: usr }],
+        response_format: { type: "json_object" },
+      }),
+    });
+    if (!res.ok) {
+      console.error("AI gen failed", res.status, await res.text().catch(() => ""));
+      return providedFixes || {};
+    }
+    const data = await res.json();
+    const txt = data?.choices?.[0]?.message?.content || "{}";
+    const ai = JSON.parse(txt.replace(/^```json\s*|\s*```$/g, ""));
+    // Caller-provided fixes override AI to preserve user intent
+    return { ...ai, ...(providedFixes || {}) };
+  } catch (e) {
+    console.error("AI gen exception", e);
+    return providedFixes || {};
+  }
+}
+
+function injectSections(html: string, sectionsHtml: string): { html: string; added: boolean } {
+  if (!sectionsHtml || html.includes("<!--gutf:sections-->")) return { html, added: false };
+  // Insert after intro marker if present, else after responsive CSS, else prepend
+  const introClose = "<!--/gutf:intro-->";
+  const block = `\n<!--gutf:sections-->${sectionsHtml}<!--/gutf:sections-->\n`;
+  if (html.includes(introClose)) return { html: html.replace(introClose, introClose + block), added: true };
+  const cssIdx = html.indexOf("</style>");
+  if (cssIdx >= 0) return { html: html.slice(0, cssIdx + 8) + block + html.slice(cssIdx + 8), added: true };
+  return { html: block + html, added: true };
+}
+
+function visualValidate(liveHtml: string): { score: number; checks: Record<string, boolean | number>; issues: string[] } {
+  const issues: string[] = [];
+  const checks: Record<string, boolean | number> = {};
+  const h2Count = (liveHtml.match(/<h2\b/gi) || []).length;
+  checks.h2_count = h2Count; if (h2Count < 3) issues.push("low-h2-count");
+  const h3Count = (liveHtml.match(/<h3\b/gi) || []).length;
+  checks.h3_count = h3Count;
+  const imgs = liveHtml.match(/<img\b[^>]*>/gi) || [];
+  const imgsWithAlt = imgs.filter((i) => /\balt=(["'])[^"']+\1/i.test(i)).length;
+  checks.img_total = imgs.length;
+  checks.img_alt_coverage = imgs.length ? Math.round((imgsWithAlt / imgs.length) * 100) : 100;
+  if (imgs.length && imgsWithAlt / imgs.length < 0.8) issues.push("low-alt-coverage");
+  const fixedWidth = /style=(["'])[^"']*width\s*:\s*\d{3,}px[^"']*\1/i.test(liveHtml);
+  checks.no_fixed_width = !fixedWidth; if (fixedWidth) issues.push("fixed-pixel-widths");
+  const hasFaq = /class=(['"])[^'"]*gutf-faq[^'"]*\1/i.test(liveHtml);
+  checks.has_faq_block = hasFaq;
+  const hasBottomLine = /class=(['"])[^'"]*gutf-bottom-line[^'"]*\1/i.test(liveHtml);
+  checks.has_bottom_line = hasBottomLine;
+  const hasResponsiveCss = /gutf-overhaul-v1/.test(liveHtml);
+  checks.has_responsive_css = hasResponsiveCss; if (!hasResponsiveCss) issues.push("missing-responsive-css");
+  let jsonLdValid = false;
+  const ldMatch = liveHtml.match(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/i);
+  if (ldMatch) { try { JSON.parse(ldMatch[1]); jsonLdValid = true; } catch { issues.push("invalid-jsonld"); } }
+  checks.jsonld_valid = jsonLdValid;
+  // Score 0-100
+  let score = 100;
+  if (!hasFaq) score -= 10;
+  if (!hasBottomLine) score -= 10;
+  if (!hasResponsiveCss) score -= 15;
+  if (!jsonLdValid) score -= 10;
+  if (h2Count < 3) score -= 15;
+  if (imgs.length && imgsWithAlt / imgs.length < 0.8) score -= 10;
+  if (fixedWidth) score -= 10;
+  return { score: Math.max(0, score), checks, issues };
+}
+
 function buildEmergencySeed(post: any, fixes: Record<string, any>): string {
   const title = stripTags(fixes.metaTitle || post?.title?.raw || post?.title?.rendered || "Updated article");
   const excerpt = stripTags(fixes.metaDescription || post?.excerpt?.raw || post?.excerpt?.rendered || "This article has been refreshed for clarity, structure, and mobile readability.");
@@ -268,6 +377,7 @@ Deno.serve(async (req) => {
   if (!postId) return jsonRes({ error: "post_id required" }, 400);
   const fixes = body.fixes || {};
   const dryRun = !!body.dry_run;
+  const premiumQuality = body.premium_quality !== false; // default ON
 
   const user = Deno.env.get("WP_USERNAME");
   const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
@@ -335,17 +445,24 @@ Deno.serve(async (req) => {
     await logEvent(postId, `Recovered empty editable content with generated seed (${diag}; live_slot=${hasSlot})`, true);
   }
 
+
+  // 1b. Premium AI generation (SOTA, semantic, outranking content) — merged with caller fixes.
+  const enriched = premiumQuality ? await generatePremiumContent(post, raw, fixes) : (fixes || {});
+
   // 2. Visual transforms
   const visual = applyVisualFixes(raw);
   let html = visual.html;
   const changes: string[] = [...visual.changes];
 
-  // 3. Inject blocks
+  // 3. Inject blocks (responsive CSS first so it sits above content)
   const css = ensureResponsiveCss(html); html = css.html; if (css.added) changes.push("responsive-css");
-  const intro = injectIntro(html, fixes.introHtml); html = intro.html; if (intro.added) changes.push("intro");
-  const concl = injectConclusion(html, fixes.conclusionHtml); html = concl.html; if (concl.added) changes.push("conclusion");
-  const faq = injectFaq(html, fixes.faqHtml); html = faq.html; if (faq.added) changes.push("faq");
-  const ld = injectJsonLd(html, fixes.jsonLd); html = ld.html; if (ld.added) changes.push("jsonld");
+  const intro = injectIntro(html, enriched.introHtml); html = intro.html; if (intro.added) changes.push("intro");
+  const sections = injectSections(html, enriched.sectionsHtml); html = sections.html; if (sections.added) changes.push("premium-sections");
+  const concl = injectConclusion(html, enriched.conclusionHtml); html = concl.html; if (concl.added) changes.push("conclusion");
+  const faq = injectFaq(html, enriched.faqHtml); html = faq.html; if (faq.added) changes.push("faq");
+  const ld = injectJsonLd(html, enriched.jsonLd); html = ld.html; if (ld.added) changes.push("jsonld");
+  // Re-run visual transforms over AI-injected blocks (lazy imgs, table wrap, iframe wrap)
+  const visual2 = applyVisualFixes(html); html = visual2.html; changes.push(...visual2.changes.map((c) => `post:${c}`));
 
   if (dryRun) return jsonRes({ ok: true, dry_run: true, changes, preview: html.slice(0, 4000) });
 
@@ -358,8 +475,10 @@ Deno.serve(async (req) => {
   const runId = crypto.randomUUID();
   await backupPostContent(postId, runId, originalRaw || raw, post?.status, post?.date_gmt);
   const updateBody: Record<string, unknown> = { content: html, status: "publish" };
-  if (typeof fixes.metaTitle === "string" && fixes.metaTitle.trim()) updateBody.title = fixes.metaTitle.trim();
-  if (typeof fixes.metaDescription === "string" && fixes.metaDescription.trim()) updateBody.excerpt = fixes.metaDescription.trim();
+  const finalMetaTitle = (typeof enriched.metaTitle === "string" && enriched.metaTitle.trim()) ? enriched.metaTitle.trim() : "";
+  const finalMetaDesc = (typeof enriched.metaDescription === "string" && enriched.metaDescription.trim()) ? enriched.metaDescription.trim() : "";
+  if (finalMetaTitle) updateBody.title = finalMetaTitle;
+  if (finalMetaDesc) updateBody.excerpt = finalMetaDesc;
 
   const updateRes = await fetch(`${WP_BASE}/posts/${postId}`, {
     method: "POST",
@@ -380,6 +499,7 @@ Deno.serve(async (req) => {
   const restHasSignals = containsAppliedSignal(verifyContent);
   let liveHasContentSlot: boolean | null = null;
   let liveHasSignals = false;
+  let visualReport: { score: number; checks: Record<string, boolean | number>; issues: string[] } | null = null;
   try {
     const link = String(updatedPost?.link || post?.link || "");
     if (link) {
@@ -388,16 +508,25 @@ Deno.serve(async (req) => {
         const liveHtml = await liveRes.text();
         liveHasContentSlot = hasLiveContentSlot(liveHtml);
         liveHasSignals = containsAppliedSignal(liveHtml);
+        // Validate the live article zone, not the whole document
+        const articleZone = (() => {
+          const idx = liveHtml.search(/<(article|main)\b/i);
+          if (idx < 0) return liveHtml;
+          const tag = (liveHtml.slice(idx).match(/<(article|main)\b/i) || ["", "article"])[1].toLowerCase();
+          return findBalancedElement(liveHtml, tag, idx) || liveHtml;
+        })();
+        visualReport = visualValidate(articleZone);
       }
     }
   } catch { /* live verification is best-effort */ }
 
   if (!restHasSignals) {
     await logEvent(postId, `Overhaul write failed verification; rolled back required (${changes.join(", ")})`, false);
-    return jsonRes({ ok: false, post_id: postId, changes, message: "WordPress accepted the request, but the saved post content did not contain the overhaul markers. No reliable live change was confirmed.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals } }, 200);
+    return jsonRes({ ok: false, post_id: postId, changes, message: "WordPress accepted the request, but the saved post content did not contain the overhaul markers. No reliable live change was confirmed.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals }, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } }, 200);
   }
 
   const visible = liveHasContentSlot !== false || liveHasSignals;
-  await logEvent(postId, `Overhauled and verified: ${changes.join(", ")} (source=${contentSource})`, true);
-  return jsonRes({ ok: true, post_id: postId, changes, message: visible ? `Applied, published, and verified: ${changes.join(", ")}` : "Saved and published in WordPress post content, but the live template does not appear to render post content. The WordPress update is verified; check the Elementor single-post template if the public page still looks unchanged.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals } });
+  const visualScore = visualReport?.score ?? null;
+  await logEvent(postId, `Overhauled and verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"})`, true);
+  return jsonRes({ ok: true, post_id: postId, changes, message: visible ? `Applied, published, and verified (visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}` : "Saved and published in WordPress post content, but the live template does not appear to render post content. Check the Elementor/single-post template.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals }, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
 });
