@@ -1332,23 +1332,29 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
                   {overhaulResult.verification && (
                     <div className="mt-3 space-y-3 text-muted-foreground">
                       <div className="rounded-md border bg-background/50 p-3 space-y-2">
-                        <div className="font-medium text-foreground">LIVE VERIFICATION — public WordPress page</div>
-                        <a href={overhaulResult.verification.live_fetched_url || overhaulResult.verification.live_url || post.link} target="_blank" rel="noreferrer" className="text-primary underline inline-flex items-center gap-1 break-all">
-                          {overhaulResult.verification.live_url || post.link} <ExternalLink className="size-3 shrink-0" />
+                        <div className="font-medium text-foreground">LIVE VERIFICATION — clean original WordPress URL</div>
+                        <a href={overhaulResult.verification.live_canonical_url || overhaulResult.verification.live_url || post.link} target="_blank" rel="noreferrer" className="text-primary underline inline-flex items-center gap-1 break-all">
+                          {overhaulResult.verification.live_canonical_url || overhaulResult.verification.live_url || post.link} <ExternalLink className="size-3 shrink-0" />
                         </a>
                         <div className="grid grid-cols-2 gap-2">
                           <MiniStat label="Visible words" value={`${overhaulResult.verification.live_body_word_count ?? 0}/${overhaulResult.verification.live_min_word_count ?? 600}`} className={overhaulResult.verification.live_body_ok ? "text-emerald-500" : "text-destructive"} />
                           <MiniStat label="Visible H2" value={`${overhaulResult.verification.live_body_h2_count ?? 0}/${overhaulResult.verification.live_min_h2_count ?? 3}`} className={overhaulResult.verification.live_body_ok ? "text-emerald-500" : "text-destructive"} />
                         </div>
                         <div className={overhaulResult.verification.live_body_ok ? "text-emerald-500 font-medium" : "text-destructive font-medium"}>
-                          Verdict: {overhaulResult.verification.live_body_ok ? "PASS — readers can see a substantial article" : "FAIL — public page is still empty/thin for readers"}
+                          Verdict: {overhaulResult.verification.live_body_ok ? "PASS — clean original URL and cache-busted URL both show the updated article" : "FAIL — clean original URL is not showing the verified update"}
                         </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <MiniStat label="Clean URL marker" value={overhaulResult.verification.clean?.live_has_run_marker ? "yes" : "no"} className={overhaulResult.verification.clean?.live_has_run_marker ? "text-emerald-500" : "text-destructive"} />
+                        <MiniStat label="Cache-busted marker" value={overhaulResult.verification.cache_busted?.live_has_run_marker ? "yes" : "no"} className={overhaulResult.verification.cache_busted?.live_has_run_marker ? "text-emerald-500" : "text-destructive"} />
+                        <MiniStat label="Clean words/H2" value={`${overhaulResult.verification.clean?.live_body_word_count ?? 0}/${overhaulResult.verification.clean?.live_body_h2_count ?? 0}`} className={overhaulResult.verification.live_clean_ok ? "text-emerald-500" : "text-destructive"} />
+                        <MiniStat label="Busted words/H2" value={`${overhaulResult.verification.cache_busted?.live_body_word_count ?? 0}/${overhaulResult.verification.cache_busted?.live_body_h2_count ?? 0}`} className={overhaulResult.verification.live_cache_busted_ok ? "text-emerald-500" : "text-destructive"} />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <MiniStat label="HTTP" value={overhaulResult.verification.live_status ?? "unknown"} />
                         <MiniStat label="Attempts" value={overhaulResult.verification.live_attempts ?? "—"} />
                         <MiniStat label="WP saved marker" value={overhaulResult.verification.rest_has_run_marker ? "yes" : "no"} className={overhaulResult.verification.rest_has_run_marker ? "text-emerald-500" : "text-destructive"} />
-                        <MiniStat label="Live exact run" value={overhaulResult.verification.live_has_run_marker ? "yes" : "no"} className={overhaulResult.verification.live_has_run_marker ? "text-emerald-500" : "text-destructive"} />
+                        <MiniStat label="Cloudflare purge" value={overhaulResult.verification.cache_purge?.attempted ? (overhaulResult.verification.cache_purge?.ok ? "ok" : "failed") : "skipped"} className={overhaulResult.verification.cache_purge?.ok ? "text-emerald-500" : ""} />
                         <MiniStat label="Status published" value={overhaulResult.verification.saved_status_publish ? "yes" : "no"} className={overhaulResult.verification.saved_status_publish ? "text-emerald-500" : "text-destructive"} />
                         <MiniStat label="Content source" value={overhaulResult.verification.live_content_source || "unknown"} />
                       </div>
