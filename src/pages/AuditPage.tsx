@@ -1096,12 +1096,13 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
     return next;
   };
 
-  const fullOverhaul = async () => {
+  const fullOverhaul = async (premium = false) => {
     if (!fixes) { toast({ title: "Generate AI fixes first" }); return; }
-    if (!confirm(`FULL OVERHAUL — applies all changes to LIVE post ${post.post_id}:\n\n• Wraps tables/iframes for mobile responsiveness\n• Strips fixed pixel widths\n• Adds lazy-loading to images\n• Injects intro, FAQ section, conclusion (idempotent — safe to re-run)\n• Adds JSON-LD schema\n• Adds responsive CSS guard\n• Updates meta title + description\n\nProceed?`)) return;
+    const label = premium ? "FULL OVERHAUL (PREMIUM AI REWRITE)" : "FULL OVERHAUL";
+    if (!confirm(`${label} — applies all changes to LIVE post ${post.post_id}:\n\n• Wraps tables/iframes for mobile responsiveness\n• Strips fixed pixel widths\n• Adds lazy-loading to images\n• Injects intro, FAQ section, conclusion (idempotent — safe to re-run)\n• Adds JSON-LD schema\n• Adds responsive CSS guard\n• Updates meta title + description${premium ? "\n• AI-rewrites body copy for higher quality (only on small posts)" : ""}\n\nProceed?`)) return;
     setPushing(true);
     try {
-      const r = await callAudit<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any; visual?: any; body_word_count?: number; body_h2_count?: number }>("wp-overhaul", { post_id: post.post_id, fixes: compactFixesForOverhaul(fixes) });
+      const r = await callAudit<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any; visual?: any; body_word_count?: number; body_h2_count?: number }>("wp-overhaul", { post_id: post.post_id, fixes: compactFixesForOverhaul(fixes), premium_quality: premium });
       setOverhaulResult({ ok: !!r.ok, changes: r.changes || [], message: r.message || "", content_source: r.content_source, verification: r.verification, visual: r.visual, body_word_count: r.body_word_count, body_h2_count: r.body_h2_count });
       toast({ title: r.ok ? `Public live post verified ${post.post_id}` : "Not visible on live post", description: r.message, variant: r.ok ? "default" : "destructive" });
     } catch (e: any) { toast({ title: "Overhaul failed", description: e.message, variant: "destructive" }); }
