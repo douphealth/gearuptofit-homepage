@@ -410,6 +410,7 @@ function BulkCleanupPanel() {
   const [verifyResult, setVerifyResult] = useState<Verdict | null>(null);
   const [autoPublish, setAutoPublish] = useState(true);
   const [autoRollback, setAutoRollback] = useState(true);
+  const [autoVerify, setAutoVerify] = useState(true);
   const [resumable, setResumable] = useState<{ phase: string; page: number; processed: number; updated_at: string } | null>(null);
   const [runId] = useState(() => `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 
