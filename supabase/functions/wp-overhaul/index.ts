@@ -34,21 +34,79 @@ async function readBody(req: Request) {
   try { return await req.json() as Record<string, any>; } catch { return {}; }
 }
 
-const RESPONSIVE_CSS = `<style>/*gutf-overhaul-v1*/
-.gutf-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;margin:1.25em 0}
-.gutf-table-wrap table{min-width:100%}
-.gutf-embed-wrap{position:relative;width:100%;max-width:100%;aspect-ratio:16/9;margin:1.25em 0}
+const RESPONSIVE_CSS = `<style>/*gutf-overhaul-v2*/
+.gutf-article{font-size:1.05em;line-height:1.72;color:#1a1a1a}
+.gutf-article p{margin:1em 0}
+.gutf-article h2{font-size:1.7em;line-height:1.25;margin:1.6em 0 .55em;letter-spacing:-.01em;font-weight:800;position:relative;padding-left:.85em}
+.gutf-article h2::before{content:"";position:absolute;left:0;top:.25em;bottom:.25em;width:5px;border-radius:3px;background:linear-gradient(180deg,#e11d48,#f59e0b)}
+.gutf-article h3{font-size:1.25em;line-height:1.35;margin:1.4em 0 .45em;font-weight:700}
+.gutf-article ul,.gutf-article ol{padding-left:1.4em;margin:1em 0}
+.gutf-article ul li,.gutf-article ol li{margin:.45em 0}
+.gutf-article a{color:#b91c1c;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1.5px;font-weight:600}
+.gutf-article a:hover{color:#7f1d1d;text-decoration-thickness:2.5px}
+.gutf-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;margin:1.5em 0;border:1px solid rgba(0,0,0,.08);border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.gutf-table-wrap table{min-width:100%;border-collapse:collapse;margin:0!important}
+.gutf-table-wrap th{background:linear-gradient(180deg,#fafafa,#f3f4f6);text-align:left;padding:14px 16px;font-weight:700;font-size:.95em;border-bottom:2px solid rgba(0,0,0,.08);color:#111}
+.gutf-table-wrap td{padding:13px 16px;border-bottom:1px solid rgba(0,0,0,.06);vertical-align:top}
+.gutf-table-wrap tr:last-child td{border-bottom:0}
+.gutf-table-wrap tr:nth-child(even) td{background:rgba(0,0,0,.015)}
+.gutf-embed-wrap{position:relative;width:100%;max-width:100%;aspect-ratio:16/9;margin:1.5em 0;border-radius:14px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.08)}
 .gutf-embed-wrap iframe{position:absolute;inset:0;width:100%!important;height:100%!important;max-width:100%;border:0}
-.gutf-faq{margin:2em 0;padding:1.5em;border:1px solid rgba(0,0,0,.08);border-radius:12px;background:rgba(0,0,0,.02)}
-.gutf-faq h2{margin-top:0}
-.gutf-faq-item{margin:1em 0;padding-bottom:1em;border-bottom:1px solid rgba(0,0,0,.06)}
+.gutf-section{margin:1.6em 0}
+.gutf-key-takeaways{margin:2em 0;padding:1.4em 1.6em;border-radius:16px;background:linear-gradient(135deg,#fff7ed 0%,#fef3c7 100%);border:1px solid #fcd34d;box-shadow:0 4px 14px rgba(245,158,11,.12);position:relative}
+.gutf-key-takeaways::before{content:"\\2605 KEY TAKEAWAYS";position:absolute;top:-11px;left:18px;background:#b45309;color:#fff;font-size:.72em;font-weight:800;letter-spacing:.12em;padding:4px 12px;border-radius:99px}
+.gutf-key-takeaways ul{margin:.4em 0 0;padding-left:1.3em;list-style:none}
+.gutf-key-takeaways li{position:relative;margin:.6em 0;padding-left:1.5em}
+.gutf-key-takeaways li::before{content:"\\2713";position:absolute;left:0;top:.05em;color:#b45309;font-weight:900;font-size:1.15em}
+.gutf-callout{margin:1.5em 0;padding:1.1em 1.3em 1.1em 1.4em;border-radius:12px;border-left:5px solid #3b82f6;background:linear-gradient(90deg,rgba(59,130,246,.08),rgba(59,130,246,.02));font-size:.98em}
+.gutf-callout.tip{border-color:#10b981;background:linear-gradient(90deg,rgba(16,185,129,.08),rgba(16,185,129,.02))}
+.gutf-callout.warning{border-color:#f59e0b;background:linear-gradient(90deg,rgba(245,158,11,.1),rgba(245,158,11,.02))}
+.gutf-callout.expert{border-color:#8b5cf6;background:linear-gradient(90deg,rgba(139,92,246,.08),rgba(139,92,246,.02))}
+.gutf-callout strong{display:block;margin-bottom:.3em;font-size:.85em;letter-spacing:.08em;text-transform:uppercase;color:#1e3a8a}
+.gutf-callout.tip strong{color:#065f46}
+.gutf-callout.warning strong{color:#92400e}
+.gutf-callout.expert strong{color:#5b21b6}
+.gutf-pullquote{margin:2em 0;padding:1.3em 1.5em;border-left:5px solid #e11d48;background:#fafafa;font-size:1.18em;line-height:1.55;font-style:italic;font-weight:500;color:#1a1a1a;border-radius:0 8px 8px 0}
+.gutf-pullquote cite{display:block;margin-top:.6em;font-size:.78em;font-style:normal;font-weight:600;color:#6b7280;letter-spacing:.04em;text-transform:uppercase}
+.gutf-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin:1.8em 0}
+.gutf-stat{padding:1.1em 1.2em;border-radius:14px;background:linear-gradient(135deg,#fff,#fafafa);border:1px solid rgba(0,0,0,.08);box-shadow:0 2px 6px rgba(0,0,0,.04);text-align:center}
+.gutf-stat .num{display:block;font-size:1.85em;font-weight:800;line-height:1.1;color:#b91c1c;letter-spacing:-.02em}
+.gutf-stat .lbl{display:block;margin-top:.25em;font-size:.82em;color:#4b5563;font-weight:500}
+.gutf-proscons{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:1.6em 0}
+.gutf-proscons>div{padding:1.1em 1.25em;border-radius:14px;border:1px solid rgba(0,0,0,.08)}
+.gutf-proscons .pros{background:linear-gradient(135deg,#ecfdf5,#fff)}
+.gutf-proscons .cons{background:linear-gradient(135deg,#fef2f2,#fff)}
+.gutf-proscons h4{margin:0 0 .5em;font-size:.95em;letter-spacing:.05em;text-transform:uppercase}
+.gutf-proscons .pros h4{color:#047857}
+.gutf-proscons .cons h4{color:#b91c1c}
+.gutf-proscons ul{margin:0;padding-left:1.2em}
+.gutf-proscons li{margin:.35em 0}
+.gutf-toc{margin:1.5em 0;padding:1.2em 1.4em;border-radius:12px;background:rgba(0,0,0,.025);border:1px solid rgba(0,0,0,.06)}
+.gutf-toc h3{margin:0 0 .5em;font-size:.85em;letter-spacing:.1em;text-transform:uppercase;color:#374151}
+.gutf-toc ol{margin:0;padding-left:1.4em;font-size:.97em}
+.gutf-toc li{margin:.35em 0}
+.gutf-toc a{font-weight:500;color:#374151;text-decoration:none}
+.gutf-toc a:hover{color:#b91c1c;text-decoration:underline}
+.gutf-related{margin:2em 0;padding:1.3em 1.5em;border-radius:14px;background:linear-gradient(135deg,#f5f3ff,#fff);border:1px solid #ddd6fe}
+.gutf-related h3{margin:0 0 .6em;font-size:.85em;letter-spacing:.1em;text-transform:uppercase;color:#5b21b6}
+.gutf-related ul{margin:0;padding-left:1.2em}
+.gutf-related li{margin:.4em 0}
+.gutf-faq{margin:2.2em 0;padding:1.6em 1.8em;border:1px solid rgba(0,0,0,.08);border-radius:16px;background:linear-gradient(180deg,#fafafa,#fff);box-shadow:0 2px 10px rgba(0,0,0,.04)}
+.gutf-faq>h2{margin-top:0}
+.gutf-faq-item{margin:1.1em 0;padding:0 0 1.1em;border-bottom:1px solid rgba(0,0,0,.07)}
 .gutf-faq-item:last-child{border-bottom:0;padding-bottom:0}
-.gutf-faq-item h3{margin:0 0 .5em;font-size:1.05em}
-.gutf-bottom-line{margin:2em 0;padding:1.25em 1.5em;border-left:4px solid #e11d48;background:rgba(225,29,72,.06);border-radius:6px}
-.gutf-bottom-line h2{margin-top:0}
+.gutf-faq-item h3{margin:0 0 .4em;font-size:1.08em;color:#111;font-weight:700}
+.gutf-faq-item p{margin:0;color:#374151}
+.gutf-bottom-line{margin:2.2em 0;padding:1.4em 1.6em;border-left:5px solid #e11d48;background:linear-gradient(90deg,rgba(225,29,72,.08),rgba(225,29,72,.01));border-radius:8px;box-shadow:0 2px 8px rgba(225,29,72,.08)}
+.gutf-bottom-line h2{margin-top:0;color:#9f1239}
+.gutf-author{display:flex;gap:14px;align-items:center;margin:2em 0;padding:1.1em 1.3em;border-radius:14px;background:#f9fafb;border:1px solid rgba(0,0,0,.06)}
+.gutf-author .meta{font-size:.92em;color:#374151}
+.gutf-author .meta strong{display:block;color:#111;font-size:1em}
 @media(max-width:640px){
   .gutf-article img,.gutf-article video,.gutf-article iframe{max-width:100%!important;height:auto!important}
   .gutf-article *{max-width:100%!important;box-sizing:border-box!important}
+  .gutf-article h2{font-size:1.4em}
+  .gutf-proscons{grid-template-columns:1fr}
 }
 </style>`;
 
@@ -95,7 +153,12 @@ function applyVisualFixes(raw: string): { html: string; changes: string[] } {
 }
 
 function ensureResponsiveCss(html: string): { html: string; added: boolean } {
-  if (html.includes("/*gutf-overhaul-v1*/")) return { html, added: false };
+  // Migrate old v1 stylesheet to v2 (gorgeous components)
+  if (html.includes("/*gutf-overhaul-v1*/")) {
+    const stripped = html.replace(/<style>\/\*gutf-overhaul-v1\*\/[\s\S]*?<\/style>/g, "");
+    return { html: RESPONSIVE_CSS + "\n" + stripped, added: true };
+  }
+  if (html.includes("/*gutf-overhaul-v2*/")) return { html, added: false };
   return { html: RESPONSIVE_CSS + "\n" + html, added: true };
 }
 
@@ -187,7 +250,7 @@ function hasLiveContentSlot(pageHtml: string): boolean {
 }
 
 function containsAppliedSignal(html: string): boolean {
-  return /gutf-faq|gutf-bottom-line|gutf-overhaul-v1|gutf:intro|application\/ld\+json/i.test(html || "");
+  return /gutf-faq|gutf-bottom-line|gutf-overhaul-v[12]|gutf:intro|application\/ld\+json/i.test(html || "");
 }
 
 function canonicalPublicUrl(url: string): string {
@@ -543,6 +606,38 @@ function countTag(html: string, tag: string): number {
   return (String(html || "").match(new RegExp(`<${tag}\\b`, "gi")) || []).length;
 }
 
+// Pull a topical short-list of internal-link candidates from the cached WP corpus,
+// scored by token overlap against the source post's title/slug/keyword.
+async function fetchInternalLinkCandidates(post: any, fixes: Record<string, any>, max = 28): Promise<Array<{ url: string; title: string }>> {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) return [];
+  try {
+    const sourceTitle = stripTags(post?.title?.raw || post?.title?.rendered || "");
+    const seedText = `${sourceTitle} ${stripTags(fixes?.primaryKeyword || "")} ${(fixes?.semanticKeywords || []).join(" ")}`.toLowerCase();
+    const STOP = new Set(["the","a","an","and","or","of","for","to","in","on","at","by","with","is","are","be","this","that","you","your","our","we","best","top","guide","review","reviews","how","why","what","when","2024","2025","2026"]);
+    const seedTokens = new Set((seedText.match(/[a-z][a-z0-9'\-]{2,}/g) || []).filter((w) => !STOP.has(w)));
+    const r = await fetch(`${url}/rest/v1/wp_posts_cache?select=post_id,title,slug,link&post_id=neq.${post?.id || 0}&limit=1500`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    });
+    if (!r.ok) return [];
+    const rows: any[] = await r.json().catch(() => []);
+    const scored = rows.map((row) => {
+      const t = stripTags(row?.title || "").replace(/&[a-z#0-9]+;/gi, " ").toLowerCase();
+      const slugWords = String(row?.slug || "").replace(/-/g, " ");
+      const tokens = (`${t} ${slugWords}`.match(/[a-z][a-z0-9'\-]{2,}/g) || []).filter((w) => !STOP.has(w));
+      let overlap = 0;
+      for (const tok of tokens) if (seedTokens.has(tok)) overlap++;
+      const link = String(row?.link || "").replace(/^https?:\/\/origin\.gearuptofit\.com/i, APEX);
+      return { url: link, title: stripTags(row?.title || "").replace(/&#8217;/g, "'").replace(/&amp;/g, "&"), score: overlap };
+    }).filter((x) => x.url && x.title && x.score > 0);
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, max).map(({ url, title }) => ({ url, title }));
+  } catch {
+    return [];
+  }
+}
+
 async function generatePremiumContent(post: any, existingRaw: string, providedFixes: Record<string, any>): Promise<Record<string, any>> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) return providedFixes || {};
@@ -552,49 +647,94 @@ async function generatePremiumContent(post: any, existingRaw: string, providedFi
   const sourceText = stripTags(existingRaw).slice(0, 8000);
 
   // Strict body requirements — anything less = "empty looking" post.
-  const MIN_BODY_WORDS = 1200;
-  const MIN_BODY_H2 = 4;
+  const MIN_BODY_WORDS = 1500;
+  const MIN_BODY_H2 = 5;
+  const MIN_INTERNAL_LINKS = 6;
 
-  const sys = `You are a world-class SEO editor and copywriter for gearuptofit.com (fitness, training, gear, nutrition).
-Your job: produce a #1-ranking, EEAT-grade, semantically rich, FULL-LENGTH blog post body.
+  const candidates = await fetchInternalLinkCandidates(post, providedFixes || {}, 30);
+  const linkList = candidates.length
+    ? candidates.map((c, i) => `${i + 1}. ${c.title} — ${c.url}`).join("\n")
+    : "(no internal candidates available — skip internal link mandate, use only the natural body)";
 
-CRITICAL CONTENT REQUIREMENTS — non-negotiable:
-- sectionsHtml MUST contain at least ${MIN_BODY_H2} <div class="gutf-section"> blocks, each with one <h2> headline and 2-5 well-developed <p> paragraphs (plus optional <h3>, <ul>/<ol>, <table class="gutf-comparison">).
-- DO NOT use <section>, <article>, <header>, <footer>, <aside> — WordPress KSES sanitizer strips them. Use <div class="gutf-section"> instead.
-- Total visible prose across sectionsHtml MUST be at least ${MIN_BODY_WORDS} words.
-- Cover the topic exhaustively — methodology, science, mistakes, programming, examples, comparisons, FAQ-adjacent depth.
-- Integrate semanticKeywords and entities naturally throughout the body.
-- No filler, no AI disclaimers, no "in this article we will...". Confident expert voice.
+  const sys = `You are the principal editor of gearuptofit.com — an enterprise-grade SEO/GEO/AEO/AIO content engineer with the precision of a sports-science researcher and the polish of a flagship magazine writer. Your output ranks #1 in Google, gets cited by ChatGPT/Perplexity/Gemini answer engines, and converts readers.
 
-Output STRICT JSON ONLY (no markdown fences). Schema:
+NON-NEGOTIABLE QUALITY BAR (every output must satisfy ALL of these):
+
+A. SEMANTIC SEO + GEO/AEO/AIO
+- Weave the primary keyword into: metaTitle (front-loaded), metaDescription, H1 (post title context), introHtml first sentence, at least 2 <h2> headings, and naturally 6–10 times across the body (no stuffing).
+- Distribute 12–20 LSI/semantic keywords and 8–15 named entities (people, brands, methodologies, studies, scientific terms, geographic markers) NATURALLY throughout the body. Each entity should appear at least once in flowing prose.
+- Open EVERY <h2> section with a 1–2 sentence direct, quotable answer (AEO/answer-engine snippet pattern), then expand with depth.
+- Use comparison tables (<table class="gutf-comparison">) for any "vs", "best", or specs discussion.
+- Use bulleted lists for steps, criteria, mistakes, takeaways — answer-engine friendly.
+
+B. E-E-A-T + ORIGINALITY
+- Confident expert voice: cite real research patterns ("a 2022 meta-analysis in Sports Medicine found…"), real protocols, real numbers (heart-rate zones, %1RM, g/kg/day, mL/kg/min). Never invent fake citations with URLs — describe findings generically when uncertain.
+- Include practical examples, sample workouts/macro splits/gear specs, and at least one numbered "How to" or step list.
+- No fluff openers ("In today's fast-paced world…"), no AI disclaimers, no hedging.
+
+C. GORGEOUS HTML COMPONENTS — MANDATORY (use these exact CSS classes; they are pre-styled):
+- One <div class="gutf-key-takeaways"><ul><li>...</li> × 4–6</ul></div> immediately after the intro.
+- One <div class="gutf-toc"><h3>What's inside</h3><ol><li><a href="#anchor">Section name</a></li>...</ol></div> after the takeaways. Match #anchor to id="anchor" attributes you add on the matching <h2>.
+- 2–3 <div class="gutf-callout tip|warning|expert"><strong>Pro tip|Watch out|Expert insight</strong><p>...</p></div> distributed across sections.
+- At least 1 <blockquote class="gutf-pullquote">"...quotable insight..."<cite>— Source/role</cite></blockquote>.
+- At least 1 <div class="gutf-stats"><div class="gutf-stat"><span class="num">42%</span><span class="lbl">label</span></div>...</div> with 3–4 stats.
+- Where relevant: <div class="gutf-proscons"><div class="pros"><h4>Pros</h4><ul>…</ul></div><div class="cons"><h4>Cons</h4><ul>…</ul></div></div>.
+- Where relevant: a <table class="gutf-comparison"><thead><tr><th>...</th></tr></thead><tbody>...</tbody></table> wrapped in nothing — the system will wrap it.
+- After the FAQ, include one <div class="gutf-related"><h3>Continue reading</h3><ul><li><a href="...">…</a></li>×4–6</ul></div> using INTERNAL link candidates only.
+
+D. INTERNAL LINKING (TOPICAL AUTHORITY ENGINE)
+You MUST insert AT LEAST ${MIN_INTERNAL_LINKS} contextual internal links across sectionsHtml + faqHtml + the .gutf-related block, drawing exclusively from this candidate list (use the EXACT URLs):
+
+${linkList}
+
+Rules:
+- Anchor text MUST be descriptive, contextual, and keyword-rich (NEVER "click here", "read more", "this article"). Use 3–7 word natural-language phrases that match the target page topic.
+- Place links inside <p> body prose where the topic genuinely overlaps. Do NOT link inside <h2>/<h3>.
+- Each target URL appears at most ONCE in the body, plus optionally once more in the .gutf-related block.
+- All hrefs MUST point to https://gearuptofit.com/... (never origin.gearuptofit.com).
+
+E. WORDPRESS-SAFETY (KSES sanitizer)
+- Do NOT use <section>, <article>, <header>, <footer>, <aside>, <script>, <style>, <iframe>. Use <div class="..."> instead.
+- No inline width/height in pixels. No data-* attributes other than data-gutf-*.
+
+F. STRUCTURAL MINIMUMS
+- sectionsHtml: ${MIN_BODY_H2}+ <div class="gutf-section"> blocks, each with one <h2 id="..."> + 2–5 <p> + optional <h3>/<ul>/<table>. Total visible prose ≥ ${MIN_BODY_WORDS} words.
+- introHtml: 2 <p>, 70–130 words, primary keyword in first sentence, hook + benefit promise.
+- faqHtml: <div class="gutf-faq"><h2>Frequently Asked Questions</h2> 6–8 <div class="gutf-faq-item"><h3>Question</h3><p>40–80 word answer</p></div></div>.
+- conclusionHtml: <div class="gutf-bottom-line"><h2>Bottom Line</h2><p>80–140 word definitive recap with primary keyword and one CTA</p></div>.
+- jsonLd: schema.org @graph with Article, FAQPage, BreadcrumbList, and a "mentions" array of {"@type":"Thing","name":entity} for the entities list (this powers Knowledge Graph + AI citations).
+
+OUTPUT STRICT JSON ONLY (no markdown fences). Schema:
 {
-  "metaTitle": string (<=60 chars, primary keyword first),
-  "metaDescription": string (<=158 chars, primary keyword, compelling),
+  "metaTitle": string (<=60 chars, primary keyword first, year if evergreen),
+  "metaDescription": string (<=158 chars, primary keyword + benefit + curiosity),
   "primaryKeyword": string,
-  "semanticKeywords": string[] (12-20 LSI/related terms),
-  "entities": string[] (8-15 named entities),
-  "introHtml": string (1 punchy <p> with primary keyword in first sentence + 1 <p> stating user benefit; 60-110 words),
-  "sectionsHtml": string (the FULL article body — 5-8 <div class="gutf-section"> blocks meeting the requirements above),
-  "faqHtml": string (<div class="gutf-faq"><h2>Frequently Asked Questions</h2> 5-7 <div class="gutf-faq-item"><h3>Q</h3><p>A</p></div></div>),
-  "conclusionHtml": string (<div class="gutf-bottom-line"><h2>Bottom Line</h2><p>...</p></div>, 70-120 words),
-  "jsonLd": object (schema.org Article + FAQPage @graph)
-}
-- HTML must be valid, semantic, mobile-friendly, NO inline width/height pixel styles, NO <script>, NO <style>, NO <section>/<article>/<header>/<footer>/<aside>.`;
+  "semanticKeywords": string[12-20],
+  "entities": string[8-15],
+  "introHtml": string,
+  "sectionsHtml": string,
+  "faqHtml": string,
+  "conclusionHtml": string,
+  "jsonLd": object
+}`;
 
   const usr = `TITLE: ${title}
 URL: ${link}
 EXCERPT: ${excerpt}
 
-EXISTING CONTENT (may be empty or thin — rewrite/expand to be the best on the web):
+EXISTING CONTENT (rewrite/expand into the definitive guide on the web — keep useful facts, discard fluff):
 ${sourceText}
 
-Return the JSON now. Remember: sectionsHtml must be the full ${MIN_BODY_WORDS}+ word body with ${MIN_BODY_H2}+ <h2> sections.`;
+Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible words, ${MIN_BODY_H2}+ <h2>, ${MIN_INTERNAL_LINKS}+ internal links from the provided candidate list, all required gorgeous components present.`;
 
   let lastAi: Record<string, any> = {};
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
+      const prevWords = htmlWordCount(lastAi.sectionsHtml || "");
+      const prevH2 = countTag(lastAi.sectionsHtml || "", "h2");
+      const prevLinks = ((lastAi.sectionsHtml || "") + (lastAi.faqHtml || "")).match(/<a\b[^>]*href=["']https:\/\/gearuptofit\.com/gi)?.length || 0;
       const reinforcement = attempt === 1 ? "" :
-        `\n\nPREVIOUS ATTEMPT FAILED VALIDATION: sectionsHtml had ${htmlWordCount(lastAi.sectionsHtml || "")} words and ${countTag(lastAi.sectionsHtml || "", "h2")} <h2> sections. You MUST return a sectionsHtml field with at least ${MIN_BODY_H2} <h2> sections and ${MIN_BODY_WORDS}+ words of real prose. This is your retry attempt ${attempt}/3.`;
+        `\n\nPREVIOUS ATTEMPT FAILED VALIDATION: words=${prevWords} (need ${MIN_BODY_WORDS}+), h2=${prevH2} (need ${MIN_BODY_H2}+), internal_links=${prevLinks} (need ${MIN_INTERNAL_LINKS}+). FIX ALL THREE. Retry ${attempt}/3.`;
       const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -604,7 +744,7 @@ Return the JSON now. Remember: sectionsHtml must be the full ${MIN_BODY_WORDS}+ 
             { role: "system", content: sys },
             { role: "user", content: usr + reinforcement },
           ],
-          max_tokens: 16000,
+          max_tokens: 20000,
           response_format: { type: "json_object" },
         }),
       });
@@ -618,16 +758,16 @@ Return the JSON now. Remember: sectionsHtml must be the full ${MIN_BODY_WORDS}+ 
       lastAi = ai;
       const wc = htmlWordCount(ai.sectionsHtml || "");
       const h2c = countTag(ai.sectionsHtml || "", "h2");
-      console.log(`AI attempt ${attempt}: sections words=${wc}, h2=${h2c}`);
-      if (wc >= MIN_BODY_WORDS && h2c >= MIN_BODY_H2) {
-        return { ...ai, ...(providedFixes || {}) };
+      const lc = ((ai.sectionsHtml || "") + (ai.faqHtml || "")).match(/<a\b[^>]*href=["']https:\/\/gearuptofit\.com/gi)?.length || 0;
+      console.log(`AI attempt ${attempt}: words=${wc}, h2=${h2c}, internal_links=${lc}`);
+      if (wc >= MIN_BODY_WORDS && h2c >= MIN_BODY_H2 && lc >= Math.min(MIN_INTERNAL_LINKS, candidates.length || MIN_INTERNAL_LINKS)) {
+        return { ...ai, _internalLinkCandidates: candidates, ...(providedFixes || {}) };
       }
     } catch (e) {
       console.error("AI gen exception", attempt, e);
     }
   }
-  // Return whatever we got; downstream verification will reject if body is empty.
-  return { ...lastAi, ...(providedFixes || {}) };
+  return { ...lastAi, _internalLinkCandidates: candidates, ...(providedFixes || {}) };
 }
 
 // WordPress KSES strips <section>, <article>, <header>, <footer>, <aside> for users
@@ -750,7 +890,7 @@ function visualValidate(liveHtml: string): { score: number; checks: Record<strin
   checks.has_faq_block = hasFaq;
   const hasBottomLine = /class=(['"])[^'"]*gutf-bottom-line[^'"]*\1/i.test(liveHtml);
   checks.has_bottom_line = hasBottomLine;
-  const hasResponsiveCss = /gutf-overhaul-v1/.test(liveHtml);
+  const hasResponsiveCss = /gutf-overhaul-v[12]/.test(liveHtml);
   checks.has_responsive_css = hasResponsiveCss; if (!hasResponsiveCss) issues.push("missing-responsive-css");
   let jsonLdValid = false;
   const ldMatch = liveHtml.match(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/i);
