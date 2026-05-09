@@ -206,6 +206,33 @@ async function logEvent(postId: number, message: string, ok: boolean) {
   } catch { /* */ }
 }
 
+async function backupPostContent(postId: number, runId: string | null, content: string, status?: string, dateGmt?: string) {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key || !content.trim()) return;
+  try {
+    await fetch(`${url}/rest/v1/wp_post_backups`, {
+      method: "POST",
+      headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({ post_id: postId, run_id: runId, content, status: status || null, date_gmt: dateGmt || null }),
+    }).then((r) => r.text());
+  } catch { /* best-effort */ }
+}
+
+function buildSeedContent(fixes: Record<string, any>): string {
+  const blocks: string[] = [];
+  const intro = typeof fixes.introHtml === "string" && fixes.introHtml.trim()
+    ? fixes.introHtml.trim()
+    : (typeof fixes.introParagraph === "string" && fixes.introParagraph.trim() ? `<p>${fixes.introParagraph.trim()}</p>` : "");
+  if (intro) blocks.push(`<!--gutf:intro-->${intro}<!--/gutf:intro-->`);
+  if (Array.isArray(fixes.h2Outline) && fixes.h2Outline.length) {
+    blocks.push(`<section class="gutf-outline"><h2>Recommended Content Structure</h2><ul>${fixes.h2Outline.map((h: unknown) => `<li>${String(h).replace(/[<>]/g, "")}</li>`).join("")}</ul></section>`);
+  }
+  if (typeof fixes.faqHtml === "string" && fixes.faqHtml.trim()) blocks.push(`<!--gutf:faq-->${fixes.faqHtml.trim()}<!--/gutf:faq-->`);
+  if (typeof fixes.conclusionHtml === "string" && fixes.conclusionHtml.trim()) blocks.push(`<!--gutf:bottom-line-->${fixes.conclusionHtml.trim()}<!--/gutf:bottom-line-->`);
+  return blocks.length ? `<div class="gutf-article gutf-generated-overhaul">\n${blocks.join("\n")}\n</div>` : "";
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
