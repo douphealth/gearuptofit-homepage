@@ -1317,9 +1317,17 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
                 FULL OVERHAUL — apply all to live post
               </Button>
               {overhaulResult && (
-                <div className="text-xs p-3 border rounded-md bg-emerald-500/10">
-                  <div className="font-medium text-emerald-500 mb-1">Overhaul applied</div>
+                <div className={`text-xs p-3 border rounded-md ${overhaulResult.ok ? "bg-emerald-500/10" : "bg-destructive/10"}`}>
+                  <div className={`font-medium mb-1 ${overhaulResult.ok ? "text-emerald-500" : "text-destructive"}`}>
+                    {overhaulResult.ok ? "Overhaul applied and verified" : "Overhaul was not applied"}
+                  </div>
                   <div className="text-muted-foreground">{overhaulResult.message}</div>
+                  {overhaulResult.content_source && <div className="mt-1 text-muted-foreground">Source: {overhaulResult.content_source}</div>}
+                  {overhaulResult.verification && (
+                    <div className="mt-1 text-muted-foreground">
+                      Saved markers: {overhaulResult.verification.rest_has_signals ? "yes" : "no"} · Live slot: {String(overhaulResult.verification.live_has_content_slot ?? "unknown")} · Live markers: {overhaulResult.verification.live_has_signals ? "yes" : "no"}
+                    </div>
+                  )}
                   <div className="mt-1 flex flex-wrap gap-1">
                     {overhaulResult.changes.map((c, i) => <Badge key={i} variant="secondary">{c}</Badge>)}
                   </div>
