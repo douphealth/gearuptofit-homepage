@@ -87,14 +87,34 @@ function existingLinks(html: string): Set<string> {
   return out;
 }
 
+// Parse explicit autolink marker ranges from raw/rendered HTML.
+// Returns absolute [start, end] of every <!--gutf:autolink-ID-->...<!--/gutf:autolink-ID-->
+// block (inclusive of both comments). Used to guarantee re-runs never re-wrap
+// content already linked, and never insert a new link that overlaps an existing one.
+function autolinkMarkerRanges(html: string): Array<{ start: number; end: number; targetId: number }> {
+  const out: Array<{ start: number; end: number; targetId: number }> = [];
+  const re = /<!--gutf:autolink-(\d+)-->[\s\S]*?<!--\/gutf:autolink-\1-->/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    out.push({ start: m.index, end: m.index + m[0].length, targetId: Number(m[1]) });
+  }
+  return out;
+}
+function rangeOverlaps(ranges: Array<{ start: number; end: number }>, start: number, end: number): boolean {
+  for (const r of ranges) if (start < r.end && end > r.start) return true;
+  return false;
+}
+
 // Build "safe regions" — text where we can insert anchors. We avoid:
 //   <a>...</a>, <h1-6>, <button>, <code>, <pre>, <script>, <style>,
-//   inside any tag's attributes, and inside our own gutf marker blocks.
+//   inside any tag's attributes, AND inside our own gutf:autolink-* marker blocks.
 function* safeTextSpans(html: string): Generator<{ start: number; end: number }> {
   const blocked = /<(a|h[1-6]|button|code|pre|script|style)\b[^>]*>[\s\S]*?<\/\1>/gi;
   const skip: Array<[number, number]> = [];
   let m: RegExpExecArray | null;
   while ((m = blocked.exec(html)) !== null) skip.push([m.index, m.index + m[0].length]);
+  // Skip explicit autolink marker spans (idempotency)
+  for (const r of autolinkMarkerRanges(html)) skip.push([r.start, r.end]);
   // Also skip everything inside tag brackets <...>
   const tagRe = /<[^>]+>/g;
   while ((m = tagRe.exec(html)) !== null) skip.push([m.index, m.index + m[0].length]);
