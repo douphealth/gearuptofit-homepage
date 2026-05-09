@@ -377,6 +377,7 @@ Deno.serve(async (req) => {
   if (!postId) return jsonRes({ error: "post_id required" }, 400);
   const fixes = body.fixes || {};
   const dryRun = !!body.dry_run;
+  const premiumQuality = body.premium_quality !== false; // default ON
 
   const user = Deno.env.get("WP_USERNAME");
   const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
