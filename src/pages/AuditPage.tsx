@@ -559,6 +559,75 @@ function BulkCleanupPanel() {
     setStatus(""); setFixing(false);
   };
 
+
+  // Post-publish verification — re-fetches the post via WP REST + live URL
+  // (cache-busted) and reports whether the orphan CSS wrapper is correctly
+  // re-wrapped on origin and absent on the live page.
+  const verifyOne = async (postId: number, link?: string): Promise<Partial<FixResult>> => {
+    try {
+      const v = await callAudit<{
+        ok: boolean; verdict: FixResult["verify_verdict"]; verified_at: string;
+        rest: { found: boolean; wrapped: boolean }; live: { found: boolean };
+      }>("wp-bulk-cleanup", { mode: "verify_post", post_id: postId, url: link, check_live: true });
+      const status: VerifyStatus =
+        v.verdict === "clean" ? "clean"
+        : v.verdict === "stale_cache" ? "stale_cache"
+        : (v.rest?.found || v.live?.found) ? "leak"
+        : "clean";
+      return { verify: status, verify_verdict: v.verdict, verified_at: v.verified_at };
+    } catch (e: any) {
+      return { verify: "error", verify_error: e?.message || String(e) };
+    }
+  };
+
+  // Re-run fix on only the posts whose last result was non-2xx, errored, or
+  // was rolled back. Useful for "Fix failed only" recovery passes.
+  const fixFailedOnly = async () => {
+    if (!results || !items) return;
+    const failedIds = results
+      .filter((r) => !r.dry_run && (
+        !r.ok || r.rolled_back || (typeof r.http_status === "number" && (r.http_status < 200 || r.http_status >= 300))
+      ))
+      .map((r) => r.post_id);
+    const uniqueIds = Array.from(new Set(failedIds));
+    if (!uniqueIds.length) { toast({ title: "Nothing to retry", description: "No failed or rolled-back posts." }); return; }
+    if (!confirm(`Retry ${uniqueIds.length} failed post(s)?${autoPublish ? " Each will also be republished." : ""}`)) return;
+    setFixing(true);
+    try {
+      const all: FixResult[] = [...results];
+      for (let i = 0; i < uniqueIds.length; i += 1) {
+        const id = uniqueIds[i];
+        setStatus(`Retry ${i + 1}/${uniqueIds.length} · post ${id}${autoPublish ? " (+publish)" : ""}`);
+        try {
+          const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", {
+            mode: "fix", post_ids: [id], publish: autoPublish, run_id: runId,
+          });
+          const next = r.results[0];
+          const idx = all.findIndex((x) => x.post_id === id);
+          if (idx >= 0) all[idx] = next; else all.push(next);
+          setResults([...all]);
+          if (next?.ok && autoVerify) {
+            const link = items.find((it) => it.post_id === id)?.link;
+            const v = await verifyOne(id, link);
+            const idx2 = all.findIndex((x) => x.post_id === id);
+            if (idx2 >= 0) all[idx2] = { ...all[idx2], ...v };
+            setResults([...all]);
+          }
+        } catch (e: any) {
+          const idx = all.findIndex((x) => x.post_id === id);
+          const next: FixResult = { post_id: id, ok: false, error: e?.message || String(e) };
+          if (idx >= 0) all[idx] = next; else all.push(next);
+          setResults([...all]);
+        }
+      }
+      const ok = all.filter((r) => uniqueIds.includes(r.post_id) && r.ok && !r.rolled_back).length;
+      toast({ title: "Retry complete", description: `${ok}/${uniqueIds.length} fixed on retry.` });
+    } catch (e: any) {
+      toast({ title: "Retry interrupted", description: e.message, variant: "destructive" });
+    }
+    setStatus(""); setFixing(false);
+  };
+
   const fixAll = async (resume = false) => {
     if (!items || items.length === 0) return;
     const willPublish = autoPublish;
