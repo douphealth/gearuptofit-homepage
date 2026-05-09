@@ -169,8 +169,14 @@ Deno.serve(async (req) => {
     return jsonRes({ error: `GET ${getRes.status}: ${t.slice(0, 200)}` }, 502);
   }
   const post = await getRes.json();
-  const raw: string = post?.content?.raw || "";
-  if (!raw) return jsonRes({ error: "Empty raw content" }, 400);
+  const raw: string =
+    (typeof post?.content?.raw === "string" && post.content.raw) ||
+    (typeof post?.content?.rendered === "string" && post.content.rendered) ||
+    "";
+  if (!raw.trim()) {
+    await logEvent(postId, "Skipped: empty content (raw+rendered both empty)", true);
+    return jsonRes({ ok: true, post_id: postId, changes: ["skipped-empty"], message: "Post has no content to overhaul." });
+  }
 
   // 2. Visual transforms
   const visual = applyVisualFixes(raw);
