@@ -357,7 +357,7 @@ Deno.serve(async (req) => {
   // 4. PUT update
   const runId = crypto.randomUUID();
   await backupPostContent(postId, runId, originalRaw || raw, post?.status, post?.date_gmt);
-  const updateBody: Record<string, unknown> = { content: html };
+  const updateBody: Record<string, unknown> = { content: html, status: "publish" };
   if (typeof fixes.metaTitle === "string" && fixes.metaTitle.trim()) updateBody.title = fixes.metaTitle.trim();
   if (typeof fixes.metaDescription === "string" && fixes.metaDescription.trim()) updateBody.excerpt = fixes.metaDescription.trim();
 
@@ -399,5 +399,5 @@ Deno.serve(async (req) => {
 
   const visible = liveHasContentSlot !== false || liveHasSignals;
   await logEvent(postId, `Overhauled and verified: ${changes.join(", ")} (source=${contentSource})`, true);
-  return jsonRes({ ok: true, post_id: postId, changes, message: visible ? `Applied and verified: ${changes.join(", ")}` : "Saved to WordPress, but the live template does not appear to render post content. Check Elementor single-post template.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals } });
+  return jsonRes({ ok: true, post_id: postId, changes, message: visible ? `Applied, published, and verified: ${changes.join(", ")}` : "Saved and published in WordPress post content, but the live template does not appear to render post content. The WordPress update is verified; check the Elementor single-post template if the public page still looks unchanged.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals } });
 });
