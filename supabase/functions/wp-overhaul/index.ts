@@ -1032,7 +1032,7 @@ Deno.serve(async (req) => {
     const r = await fetch(`${WP_BASE}/posts/${postId}?context=${ctx}&_fields=id,link,title,excerpt,content,status,date_gmt`, {
       headers: { Authorization: auth, "User-Agent": "GearupAudit/3.0" },
     });
-    return { ok: r.ok, status: r.status, body: r.ok ? await r.json() : await r.text() };
+    return { ok: r.ok, status: r.status, body: r.ok ? compactWpPost(await readJsonLimited(r)) : await readLimitedText(r, 8_000) };
   }
   let g = await fetchPost("edit");
   if (!g.ok) {
@@ -1085,6 +1085,11 @@ Deno.serve(async (req) => {
     raw = seed;
     contentSource = hasSlot ? "generated_seed_empty_rest" : "generated_seed_for_empty_template_post";
     await logEvent(postId, `Recovered empty editable content with generated seed (${diag}; live_slot=${hasSlot})`, true);
+  }
+  const compactedRaw = compactRawHtml(raw);
+  if (compactedRaw.truncated) {
+    raw = compactedRaw.raw;
+    contentSource = `${contentSource}+truncated_for_worker_memory`;
   }
 
 
