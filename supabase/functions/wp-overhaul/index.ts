@@ -728,13 +728,11 @@ ${sourceText}
 Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible words, ${MIN_BODY_H2}+ <h2>, ${MIN_INTERNAL_LINKS}+ internal links from the provided candidate list, all required gorgeous components present.`;
 
   let lastAi: Record<string, any> = {};
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  let lastWc = 0, lastH2 = 0, lastLc = 0;
+  for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const prevWords = htmlWordCount(lastAi.sectionsHtml || "");
-      const prevH2 = countTag(lastAi.sectionsHtml || "", "h2");
-      const prevLinks = ((lastAi.sectionsHtml || "") + (lastAi.faqHtml || "")).match(/<a\b[^>]*href=["']https:\/\/gearuptofit\.com/gi)?.length || 0;
       const reinforcement = attempt === 1 ? "" :
-        `\n\nPREVIOUS ATTEMPT FAILED VALIDATION: words=${prevWords} (need ${MIN_BODY_WORDS}+), h2=${prevH2} (need ${MIN_BODY_H2}+), internal_links=${prevLinks} (need ${MIN_INTERNAL_LINKS}+). FIX ALL THREE. Retry ${attempt}/3.`;
+        `\n\nPREVIOUS ATTEMPT FAILED VALIDATION: words=${lastWc} (need ${MIN_BODY_WORDS}+), h2=${lastH2} (need ${MIN_BODY_H2}+), internal_links=${lastLc} (need ${MIN_INTERNAL_LINKS}+). FIX ALL THREE.`;
       const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -744,22 +742,28 @@ Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible word
             { role: "system", content: sys },
             { role: "user", content: usr + reinforcement },
           ],
-          max_tokens: 20000,
+          max_tokens: 12000,
           response_format: { type: "json_object" },
         }),
       });
       if (!res.ok) {
-        console.error("AI gen failed", res.status, await res.text().catch(() => ""));
+        console.error("AI gen failed", res.status, (await res.text().catch(() => "")).slice(0, 200));
         continue;
       }
+      // Parse to text first then drop the response object so the full JSON
+      // payload (with reasoning tokens, usage, etc.) can be GC'd before we
+      // start building the next attempt — prevents Memory limit exceeded.
       const data = await res.json();
-      const txt = data?.choices?.[0]?.message?.content || "{}";
-      const ai = JSON.parse(String(txt).replace(/^```json\s*|\s*```$/g, ""));
-      lastAi = ai;
+      const txt = String(data?.choices?.[0]?.message?.content || "{}");
+      // @ts-ignore release reference
+      (data as any).choices = null;
+      const ai = JSON.parse(txt.replace(/^```json\s*|\s*```$/g, ""));
       const wc = htmlWordCount(ai.sectionsHtml || "");
       const h2c = countTag(ai.sectionsHtml || "", "h2");
       const lc = ((ai.sectionsHtml || "") + (ai.faqHtml || "")).match(/<a\b[^>]*href=["']https:\/\/gearuptofit\.com/gi)?.length || 0;
       console.log(`AI attempt ${attempt}: words=${wc}, h2=${h2c}, internal_links=${lc}`);
+      lastAi = ai;
+      lastWc = wc; lastH2 = h2c; lastLc = lc;
       if (wc >= MIN_BODY_WORDS && h2c >= MIN_BODY_H2 && lc >= Math.min(MIN_INTERNAL_LINKS, candidates.length || MIN_INTERNAL_LINKS)) {
         return { ...ai, _internalLinkCandidates: candidates, ...(providedFixes || {}) };
       }
