@@ -989,10 +989,9 @@ Deno.serve(async (req) => {
   if (!postId) return jsonRes({ error: "post_id required" }, 400);
   const fixes = body.fixes || {};
   const dryRun = !!body.dry_run;
-  // Default OFF: the premium AI rewrite can exceed Edge runtime memory when the
-  // model returns a large article payload. The safe path applies caller fixes
-  // and local publishable fallbacks without loading a huge AI response.
-  const premiumQuality = body.premium_quality === true;
+  // Keep this function deterministic and memory-safe. AI generation happens in
+  // audit-generate-fixes; wp-overhaul only applies those fixes and local fallbacks.
+  const premiumQuality = false;
 
   const user = Deno.env.get("WP_USERNAME");
   const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
@@ -1041,7 +1040,7 @@ Deno.serve(async (req) => {
       if (link) {
         const pageRes = await fetch(link, { headers: { "User-Agent": "GearupAudit/3.0", "Cache-Control": "no-cache" } });
         if (pageRes.ok) {
-          publicPageHtml = await pageRes.text();
+          publicPageHtml = await readLimitedText(pageRes);
           const extracted = extractPublicPostContent(publicPageHtml);
           if (extracted.html) {
             raw = extracted.html;
