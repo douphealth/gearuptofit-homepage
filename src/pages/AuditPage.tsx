@@ -337,6 +337,7 @@ type DiffSummary = {
   wrapper_tags_removed: number;
   style_tags_before: number; style_tags_after: number; style_tags_added: number;
 };
+type VerifyStatus = "pending" | "checking" | "clean" | "leak" | "stale_cache" | "error";
 type FixResult = {
   post_id: number; ok: boolean;
   removed_chars?: number; error?: string;
@@ -344,6 +345,10 @@ type FixResult = {
   published?: boolean; rolled_back?: boolean;
   dry_run?: boolean; would_change?: boolean; would_publish?: boolean;
   diff?: DiffSummary;
+  verify?: VerifyStatus;
+  verify_verdict?: "clean" | "stale_cache" | "real_leak" | "origin_only" | "unknown";
+  verified_at?: string;
+  verify_error?: string;
 };
 type Verdict = {
   verdict: "clean" | "stale_cache" | "real_leak" | "origin_only";
@@ -366,6 +371,7 @@ function toCsv(rows: LeakItem[], results: FixResult[] | null): string {
     "post_id", "title", "url",
     "fix_status", "publish_status", "http_code", "completed_at",
     "removed_chars", "chars_delta", "wrapper_tags_removed", "style_tags_added",
+    "verify_status", "verify_verdict", "verified_at",
     "fix_error", "sample",
   ];
   const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
@@ -382,6 +388,9 @@ function toCsv(rows: LeakItem[], results: FixResult[] | null): string {
       r?.diff?.chars_delta ?? "",
       r?.diff?.wrapper_tags_removed ?? "",
       r?.diff?.style_tags_added ?? "",
+      r?.verify ?? "",
+      r?.verify_verdict ?? "",
+      r?.verified_at ?? "",
       r?.error ?? "",
       it.sample ?? "",
     ].map(esc).join(","));
@@ -401,6 +410,7 @@ function BulkCleanupPanel() {
   const [verifyResult, setVerifyResult] = useState<Verdict | null>(null);
   const [autoPublish, setAutoPublish] = useState(true);
   const [autoRollback, setAutoRollback] = useState(true);
+  const [autoVerify, setAutoVerify] = useState(true);
   const [resumable, setResumable] = useState<{ phase: string; page: number; processed: number; updated_at: string } | null>(null);
   const [runId] = useState(() => `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 
@@ -549,6 +559,75 @@ function BulkCleanupPanel() {
     setStatus(""); setFixing(false);
   };
 
+
+  // Post-publish verification — re-fetches the post via WP REST + live URL
+  // (cache-busted) and reports whether the orphan CSS wrapper is correctly
+  // re-wrapped on origin and absent on the live page.
+  const verifyOne = async (postId: number, link?: string): Promise<Partial<FixResult>> => {
+    try {
+      const v = await callAudit<{
+        ok: boolean; verdict: FixResult["verify_verdict"]; verified_at: string;
+        rest: { found: boolean; wrapped: boolean }; live: { found: boolean };
+      }>("wp-bulk-cleanup", { mode: "verify_post", post_id: postId, url: link, check_live: true });
+      const status: VerifyStatus =
+        v.verdict === "clean" ? "clean"
+        : v.verdict === "stale_cache" ? "stale_cache"
+        : (v.rest?.found || v.live?.found) ? "leak"
+        : "clean";
+      return { verify: status, verify_verdict: v.verdict, verified_at: v.verified_at };
+    } catch (e: any) {
+      return { verify: "error", verify_error: e?.message || String(e) };
+    }
+  };
+
+  // Re-run fix on only the posts whose last result was non-2xx, errored, or
+  // was rolled back. Useful for "Fix failed only" recovery passes.
+  const fixFailedOnly = async () => {
+    if (!results || !items) return;
+    const failedIds = results
+      .filter((r) => !r.dry_run && (
+        !r.ok || r.rolled_back || (typeof r.http_status === "number" && (r.http_status < 200 || r.http_status >= 300))
+      ))
+      .map((r) => r.post_id);
+    const uniqueIds = Array.from(new Set(failedIds));
+    if (!uniqueIds.length) { toast({ title: "Nothing to retry", description: "No failed or rolled-back posts." }); return; }
+    if (!confirm(`Retry ${uniqueIds.length} failed post(s)?${autoPublish ? " Each will also be republished." : ""}`)) return;
+    setFixing(true);
+    try {
+      const all: FixResult[] = [...results];
+      for (let i = 0; i < uniqueIds.length; i += 1) {
+        const id = uniqueIds[i];
+        setStatus(`Retry ${i + 1}/${uniqueIds.length} · post ${id}${autoPublish ? " (+publish)" : ""}`);
+        try {
+          const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", {
+            mode: "fix", post_ids: [id], publish: autoPublish, run_id: runId,
+          });
+          const next = r.results[0];
+          const idx = all.findIndex((x) => x.post_id === id);
+          if (idx >= 0) all[idx] = next; else all.push(next);
+          setResults([...all]);
+          if (next?.ok && autoVerify) {
+            const link = items.find((it) => it.post_id === id)?.link;
+            const v = await verifyOne(id, link);
+            const idx2 = all.findIndex((x) => x.post_id === id);
+            if (idx2 >= 0) all[idx2] = { ...all[idx2], ...v };
+            setResults([...all]);
+          }
+        } catch (e: any) {
+          const idx = all.findIndex((x) => x.post_id === id);
+          const next: FixResult = { post_id: id, ok: false, error: e?.message || String(e) };
+          if (idx >= 0) all[idx] = next; else all.push(next);
+          setResults([...all]);
+        }
+      }
+      const ok = all.filter((r) => uniqueIds.includes(r.post_id) && r.ok && !r.rolled_back).length;
+      toast({ title: "Retry complete", description: `${ok}/${uniqueIds.length} fixed on retry.` });
+    } catch (e: any) {
+      toast({ title: "Retry interrupted", description: e.message, variant: "destructive" });
+    }
+    setStatus(""); setFixing(false);
+  };
+
   const fixAll = async (resume = false) => {
     if (!items || items.length === 0) return;
     const willPublish = autoPublish;
@@ -583,6 +662,16 @@ function BulkCleanupPanel() {
           setResults([...all]);
           processed.push(ids[i]);
           await saveCheckpoint({ phase: "fix", page: 1, processed_ids: processed, affected: items, results: all });
+
+          // Auto-verify after each successful fix.
+          if (r.results[0]?.ok && !r.results[0]?.dry_run && autoVerify) {
+            const link = items.find((it) => it.post_id === ids[i])?.link;
+            const v = await verifyOne(ids[i], link);
+            const idx = all.findIndex((x) => x.post_id === ids[i] && !x.dry_run);
+            if (idx >= 0) all[idx] = { ...all[idx], ...v };
+            setResults([...all]);
+            await saveCheckpoint({ phase: "fix", page: 1, processed_ids: processed, affected: items, results: all });
+          }
 
           if (!r.results[0]?.ok && autoRollback && succeededThisBatch.length > 0) {
             toast({ title: `Post ${ids[i]} failed`, description: `Auto-rolling back ${succeededThisBatch.length} previously-fixed post(s).`, variant: "destructive" });
@@ -661,11 +750,18 @@ function BulkCleanupPanel() {
       if (!post) { toast({ title: "No matching post" }); setTargetBusy(false); return; }
       const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "fix", post_ids: [post.post_id], publish: autoPublish });
       setItems([{ ...post, found: true }]);
-      setResults(r.results);
-      const res = r.results[0];
+      const merged: FixResult[] = [...r.results];
+      if (merged[0]?.ok && !merged[0]?.dry_run && autoVerify) {
+        const v = await verifyOne(post.post_id, post.link);
+        merged[0] = { ...merged[0], ...v };
+      }
+      setResults(merged);
+      const res = merged[0];
       toast({
         title: res?.ok ? `Fixed post ${post.post_id}` : `Fix failed`,
-        description: res?.ok ? `Removed ${res.removed_chars} chars of orphan wrappers.` : (res?.error || "Unknown error"),
+        description: res?.ok
+          ? `Removed ${res.removed_chars} chars of orphan wrappers${res.verify ? ` · verify: ${res.verify}` : ""}.`
+          : (res?.error || "Unknown error"),
         variant: res?.ok ? undefined : "destructive",
       });
     } catch (e: any) { toast({ title: "URL fix failed", description: e.message, variant: "destructive" }); }
@@ -733,6 +829,15 @@ function BulkCleanupPanel() {
             <Button size="sm" variant="outline" onClick={rollbackAllSucceeded} disabled={fixing || scanning || !results?.some((r) => r.ok && !r.dry_run && !r.rolled_back)} title="Restore previously-fixed posts to their pre-fix backup">
               Rollback fixed
             </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={fixFailedOnly}
+              disabled={fixing || scanning || !results?.some((r) => !r.dry_run && (!r.ok || r.rolled_back || (typeof r.http_status === "number" && (r.http_status < 200 || r.http_status >= 300))))}
+              title="Re-run fix only on posts whose last result was non-2xx, errored, or was rolled back"
+            >
+              Fix failed only
+            </Button>
             {resumable && (
               <Button size="sm" variant="default" onClick={() => (resumable.phase === "fix" ? fixAll(true) : scan(true))} disabled={scanning || fixing} title={`Resume interrupted ${resumable.phase} from ${resumable.updated_at}`}>
                 Resume {resumable.phase} ({resumable.processed} done)
@@ -745,6 +850,10 @@ function BulkCleanupPanel() {
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
               <input type="checkbox" checked={autoRollback} onChange={(e) => setAutoRollback(e.target.checked)} className="size-3.5 accent-primary" />
               Auto-rollback on failure
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" title="After every successful fix/republish, re-fetch the post via REST + live URL (cache-busted) to confirm the orphan CSS is correctly re-wrapped.">
+              <input type="checkbox" checked={autoVerify} onChange={(e) => setAutoVerify(e.target.checked)} className="size-3.5 accent-primary" />
+              Auto-verify after publish
             </label>
             <Button size="sm" variant="outline" onClick={exportCsv} disabled={!items || items.length === 0}>Export CSV</Button>
             <Button size="sm" variant="outline" onClick={exportJson} disabled={!items || items.length === 0}>Export JSON</Button>
@@ -824,6 +933,7 @@ function BulkCleanupPanel() {
                   <th className="p-2">Publish</th>
                   <th className="p-2">HTTP</th>
                   <th className="p-2">Diff</th>
+                  <th className="p-2" title="Post-publish verification: re-fetch via REST + live URL (cache-busted) to confirm the orphan CSS is correctly re-wrapped.">Verified</th>
                   <th className="p-2">When</th>
                 </tr>
               </thead>
@@ -856,6 +966,14 @@ function BulkCleanupPanel() {
                       </td>
                       <td className="p-2 text-muted-foreground">
                         {res?.diff ? `Δ${res.diff.chars_delta}c · −${res.diff.wrapper_tags_removed}p · +${res.diff.style_tags_added}<style>` : "—"}
+                      </td>
+                      <td className="p-2">
+                        {!res?.verify ? <span className="text-muted-foreground">—</span>
+                          : res.verify === "checking" ? <span className="text-muted-foreground">checking…</span>
+                          : res.verify === "clean" ? <span className="text-emerald-500" title={`Verdict: ${res.verify_verdict ?? "clean"}`}>✓ wrapped</span>
+                          : res.verify === "stale_cache" ? <span className="text-amber-500" title="Origin clean, CDN stale">⏳ stale CDN</span>
+                          : res.verify === "leak" ? <span className="text-destructive" title={`Verdict: ${res.verify_verdict ?? "leak"}`}>✗ leak</span>
+                          : <span className="text-amber-500" title={res.verify_error}>? error</span>}
                       </td>
                       <td className="p-2 text-muted-foreground">{ts || "—"}</td>
                     </tr>

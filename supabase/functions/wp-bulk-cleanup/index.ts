@@ -675,5 +675,93 @@ Deno.serve(async (req) => {
     });
   }
 
+  // ── VERIFY_POST ─────────────────────────────────────────────────────────
+  // Post-publish verification. Re-fetches a single post via REST (origin) and
+  // optionally the live URL with a cache-buster, then reports whether the
+  // orphan CSS leak signature is still present. Used by the UI right after
+  // every successful fix/publish to confirm the wrapper is correctly re-wrapped.
+  if (mode === "verify_post") {
+    const id = Number(body.post_id);
+    if (!id) return jsonRes({ error: "post_id required" }, 400);
+    const liveUrlIn = typeof body.url === "string" ? body.url.trim() : "";
+    const checkLive = body.check_live !== false; // default on
+
+    const user = Deno.env.get("WP_USERNAME");
+    const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
+    const auth = user && pass ? "Basic " + btoa(`${user}:${pass.replace(/\s+/g, "")}`) : null;
+
+    let restLeak: { found: boolean; sample?: string } = { found: false };
+    let restStatus = 0;
+    let postLink = liveUrlIn;
+    let restRawCleanlyWrapped = false;
+    try {
+      const headers: Record<string, string> = { "User-Agent": "GearupAudit/2.0", Accept: "application/json" };
+      if (auth) headers.Authorization = auth;
+      const ctx = auth ? "&context=edit" : "";
+      const rr = await fetch(`${WP_BASE}/posts/${id}?_fields=id,link,content,status${ctx}`, { headers });
+      restStatus = rr.status;
+      if (rr.ok) {
+        const p: any = await rr.json();
+        if (!postLink && p.link) postLink = p.link;
+        restLeak = renderedHasLeak(p.content?.rendered || "");
+        // Confirm the raw content has the orphan CSS now wrapped in <style>
+        const raw = p.content?.raw || "";
+        if (raw) {
+          const before = (raw.match(/<style\b/gi) || []).length;
+          const reRun = rewrapOrphanCss(raw);
+          // If rewrap produces NO further changes, source is already cleanly wrapped.
+          restRawCleanlyWrapped = reRun.removed === 0 && before > 0;
+        }
+      }
+    } catch (e) {
+      return jsonRes({ mode, post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+
+    let liveStatus = 0;
+    let liveLeak: { found: boolean; sample?: string } = { found: false };
+    let liveCacheHeaders: Record<string, string> = {};
+    let liveBytes = 0;
+    let liveUrl = "";
+    if (checkLive && postLink) {
+      const cacheBuster = `_cb=${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      liveUrl = postLink + (postLink.includes("?") ? "&" : "?") + cacheBuster;
+      try {
+        const lr = await fetch(liveUrl, {
+          headers: {
+            "User-Agent": "GearupAudit/2.0 (post-verify)",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            Pragma: "no-cache",
+            Accept: "text/html,application/xhtml+xml",
+          },
+          redirect: "follow",
+        });
+        liveStatus = lr.status;
+        ["age", "x-cache", "cf-cache-status", "cache-control", "x-served-by", "last-modified"].forEach((h) => {
+          const v = lr.headers.get(h);
+          if (v) liveCacheHeaders[h] = v;
+        });
+        const html = await lr.text();
+        liveBytes = html.length;
+        liveLeak = renderedHasLeak(html);
+      } catch { /* best effort */ }
+    }
+
+    let verdict: "clean" | "stale_cache" | "real_leak" | "origin_only" | "unknown" = "unknown";
+    if (!restLeak.found && !liveLeak.found) verdict = "clean";
+    else if (restLeak.found && liveLeak.found) verdict = "real_leak";
+    else if (!restLeak.found && liveLeak.found) verdict = "stale_cache";
+    else if (restLeak.found && !liveLeak.found) verdict = "origin_only";
+
+    const ok = !restLeak.found && restRawCleanlyWrapped;
+    await logEvent(id, `Post-verify: ${verdict}${ok ? " (wrapper confirmed)" : " (wrapper NOT confirmed)"}`);
+    return jsonRes({
+      mode, post_id: id, ok,
+      verdict,
+      verified_at: new Date().toISOString(),
+      rest: { ...restLeak, status: restStatus, wrapped: restRawCleanlyWrapped },
+      live: { ...liveLeak, status: liveStatus, bytes: liveBytes, url: liveUrl, cacheHeaders: liveCacheHeaders },
+    });
+  }
+
   return jsonRes({ error: "Unknown mode" }, 400);
 });
