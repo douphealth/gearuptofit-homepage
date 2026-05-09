@@ -1342,10 +1342,17 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
               )}
               {fixes.jsonLd && <FixBlock label="JSON-LD schema" value={JSON.stringify(fixes.jsonLd, null, 2)} mono />}
 
-              <Button onClick={fullOverhaul} disabled={pushing} className="w-full" variant="destructive">
-                {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
-                FULL OVERHAUL — apply all to live post
-              </Button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <Button onClick={() => fullOverhaul(false)} disabled={pushing} className="w-full" variant="destructive">
+                  {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
+                  FULL OVERHAUL (fast)
+                </Button>
+                <Button onClick={() => fullOverhaul(true)} disabled={pushing} className="w-full" variant="default">
+                  {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
+                  PREMIUM AI rewrite
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground -mt-1">Premium rewrites body copy with AI for higher quality. Only runs on small posts (≤80KB raw) to stay within memory limits — falls back to fast mode otherwise.</p>
               {overhaulResult && (
                 <div className={`text-xs p-3 border rounded-md ${overhaulResult.ok ? "bg-emerald-500/10" : "bg-destructive/10"}`}>
                   <div className={`font-medium mb-1 ${overhaulResult.ok ? "text-emerald-500" : "text-destructive"}`}>
