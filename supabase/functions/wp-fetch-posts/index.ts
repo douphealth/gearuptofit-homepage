@@ -41,13 +41,32 @@ async function getWpCount() {
 }
 
 async function getCachedPosts(supabase: ReturnType<typeof createClient>) {
-  const { data, error } = await supabase
+  const PAGE = 1000;
+  let from = 0;
+  const all: any[] = [];
+  // Paginate around PostgREST default max-rows cap (1000)
+  while (true) {
+    const { data, error } = await supabase
+      .from("wp_posts_cache")
+      .select("post_id, slug, title, link, modified_at")
+      .order("modified_at", { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = data || [];
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+    from += PAGE;
+    if (from > 50000) break; // safety
+  }
+  return all;
+}
+
+async function getCachedCount(supabase: ReturnType<typeof createClient>) {
+  const { count, error } = await supabase
     .from("wp_posts_cache")
-    .select("post_id, slug, title, link, modified_at")
-    .order("modified_at", { ascending: false })
-    .range(0, 4999);
+    .select("post_id", { count: "exact", head: true });
   if (error) throw error;
-  return data || [];
+  return count || 0;
 }
 
 async function getDiagnostics(supabase: ReturnType<typeof createClient>, runId?: string) {
