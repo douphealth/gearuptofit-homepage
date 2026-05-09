@@ -329,23 +329,10 @@ Deno.serve(async (req) => {
   if (!raw.trim()) {
     const diag = `status=${post?.status} hasContent=${!!post?.content} keys=${post?.content ? Object.keys(post.content).join(",") : "none"}`;
     const hasSlot = publicPageHtml ? hasLiveContentSlot(publicPageHtml) : false;
-    const seed = buildSeedContent(fixes);
-    if (!seed || !hasSlot) {
-      await logEvent(postId, `Blocked: empty editable content (${diag})`, false);
-      return jsonRes({
-        ok: false,
-        skipped: true,
-        post_id: postId,
-        changes: ["blocked-empty-content"],
-        reason: hasSlot ? "no-generated-content" : "no-editable-post-content",
-        message: hasSlot
-          ? "WordPress returned empty post content and there were no generated blocks to publish."
-          : "WordPress returned empty post content and the live page has no editable article content slot. This is likely an Elementor/template-only post.",
-        detail: `No live write was made. ${diag}.`,
-      }, 200);
-    }
+    const seed = buildSeedContent(fixes) || buildEmergencySeed(post, fixes);
     raw = seed;
-    contentSource = "generated_seed_empty_rest";
+    contentSource = hasSlot ? "generated_seed_empty_rest" : "generated_seed_for_empty_template_post";
+    await logEvent(postId, `Recovered empty editable content with generated seed (${diag}; live_slot=${hasSlot})`, true);
   }
 
   // 2. Visual transforms
