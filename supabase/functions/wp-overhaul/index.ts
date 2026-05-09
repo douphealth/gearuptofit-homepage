@@ -234,6 +234,7 @@ function sampleH2(html: string): string[] {
 }
 
 function analyzeLiveVisibility(pageHtml: string, runId: string, exactRunRequired: boolean) {
+  const rawPage = String(pageHtml || "");
   const clean = stripInvisibleHtml(stripNonContent(pageHtml));
   const candidates: Array<{ source: string; html: string; priority: number }> = [];
   const contentClass = /<div\b[^>]*class=(['"])[^'"]*(?:entry-content|post-content|wp-block-post-content|elementor-widget-theme-post-content|elementor-widget-text-editor|gutf-article)[^'"]*\1[^>]*>/gi;
@@ -256,18 +257,18 @@ function analyzeLiveVisibility(pageHtml: string, runId: string, exactRunRequired
     const score = (hasRunMarker ? 1_000_000 : 0) + (hasSignals ? 250_000 : 0) + c.priority + (h2 * 500) + words;
     return { ...c, hasRunMarker, hasSignals, words, h2, score };
   });
-  const eligible = exactRunRequired ? scored.filter((c) => c.hasRunMarker) : scored;
-  const best = (eligible.length ? eligible : scored).sort((a, b) => b.score - a.score)[0] || scored[0];
+  const best = scored.sort((a, b) => b.score - a.score)[0] || scored[0];
   const text = stripTags(best?.html || "").slice(0, 600);
-  const fullHasRunMarker = containsRunMarker(clean, runId);
+  const fullHasRunMarker = containsRunMarker(rawPage, runId);
   const fullHasSignals = containsAppliedSignal(clean);
+  const visibleZoneOk = !!best && best.source !== "full-page-fallback";
   return {
     live_has_content_slot: hasLiveContentSlot(clean),
     live_has_signals: fullHasSignals,
     live_has_run_marker: fullHasRunMarker,
     live_body_word_count: best?.words || 0,
     live_body_h2_count: best?.h2 || 0,
-    live_body_ok: (best?.words || 0) >= LIVE_MIN_VISIBLE_WORDS && (best?.h2 || 0) >= LIVE_MIN_VISIBLE_H2,
+    live_body_ok: visibleZoneOk && (!exactRunRequired || fullHasRunMarker) && (best?.words || 0) >= LIVE_MIN_VISIBLE_WORDS && (best?.h2 || 0) >= LIVE_MIN_VISIBLE_H2,
     live_content_source: best?.source || "none",
     live_selected_html_bytes: (best?.html || "").length,
     live_heading_samples: sampleH2(best?.html || ""),
