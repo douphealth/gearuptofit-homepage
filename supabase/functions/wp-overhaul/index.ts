@@ -359,7 +359,33 @@ Deno.serve(async (req) => {
     await logEvent(postId, `Overhaul failed: ${updateRes.status} ${t.slice(0, 160)}`, false);
     return jsonRes({ ok: false, error: `Update ${updateRes.status}`, detail: t.slice(0, 240) }, 502);
   }
-  await updateRes.text();
-  await logEvent(postId, `Overhauled: ${changes.join(", ")}`, true);
-  return jsonRes({ ok: true, post_id: postId, changes, message: `Applied: ${changes.join(", ")}` });
+  const updatedText = await updateRes.text();
+  let updatedPost: any = {}; try { updatedPost = JSON.parse(updatedText); } catch { updatedPost = { raw: updatedText }; }
+
+  const verifyEdit = await fetchPost("edit");
+  const verifyBody: any = verifyEdit.ok ? verifyEdit.body : updatedPost;
+  const verifyContent = String(verifyBody?.content?.raw || verifyBody?.content?.rendered || "");
+  const restHasSignals = containsAppliedSignal(verifyContent);
+  let liveHasContentSlot: boolean | null = null;
+  let liveHasSignals = false;
+  try {
+    const link = String(updatedPost?.link || post?.link || "");
+    if (link) {
+      const liveRes = await fetch(`${link}${link.includes("?") ? "&" : "?"}_gutf_verify=${Date.now()}`, { headers: { "User-Agent": "GearupAudit/3.0", "Cache-Control": "no-cache" } });
+      if (liveRes.ok) {
+        const liveHtml = await liveRes.text();
+        liveHasContentSlot = hasLiveContentSlot(liveHtml);
+        liveHasSignals = containsAppliedSignal(liveHtml);
+      }
+    }
+  } catch { /* live verification is best-effort */ }
+
+  if (!restHasSignals) {
+    await logEvent(postId, `Overhaul write failed verification; rolled back required (${changes.join(", ")})`, false);
+    return jsonRes({ ok: false, post_id: postId, changes, message: "WordPress accepted the request, but the saved post content did not contain the overhaul markers. No reliable live change was confirmed.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals } }, 200);
+  }
+
+  const visible = liveHasContentSlot !== false || liveHasSignals;
+  await logEvent(postId, `Overhauled and verified: ${changes.join(", ")} (source=${contentSource})`, true);
+  return jsonRes({ ok: true, post_id: postId, changes, message: visible ? `Applied and verified: ${changes.join(", ")}` : "Saved to WordPress, but the live template does not appear to render post content. Check Elementor single-post template.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals } });
 });
