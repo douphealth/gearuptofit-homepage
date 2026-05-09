@@ -190,6 +190,48 @@ function containsAppliedSignal(html: string): boolean {
   return /gutf-faq|gutf-bottom-line|gutf-overhaul-v1|gutf:intro|application\/ld\+json/i.test(html || "");
 }
 
+function canonicalPublicUrl(url: string): string {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    u.hostname = "gearuptofit.com";
+    u.protocol = "https:";
+    return u.toString();
+  } catch {
+    return url.replace(/^https?:\/\/origin\.gearuptofit\.com/i, APEX);
+  }
+}
+
+function runMarker(runId: string): string {
+  return `gutf-publish-run-${runId}`;
+}
+
+function runMarkerHtml(runId: string): string {
+  const marker = runMarker(runId);
+  return `<!--${marker}--><span class="gutf-publish-verification" data-gutf-run="${marker}" hidden></span>`;
+}
+
+function containsRunMarker(html: string, runId: string): boolean {
+  return !!runId && String(html || "").includes(runMarker(runId));
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchLiveHtml(url: string, runId: string, attempt: number) {
+  const sep = url.includes("?") ? "&" : "?";
+  const verifyUrl = `${url}${sep}_gutf_verify=${encodeURIComponent(runId)}_${attempt}_${Date.now()}`;
+  const res = await fetch(verifyUrl, {
+    headers: {
+      "User-Agent": "GearupAudit/3.1-public-verify",
+      "Cache-Control": "no-cache, no-store, max-age=0",
+      Pragma: "no-cache",
+    },
+  });
+  return { ok: res.ok, status: res.status, url, html: res.ok ? await res.text() : await res.text().catch(() => "") };
+}
+
 async function logEvent(postId: number, message: string, ok: boolean) {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -473,6 +515,8 @@ Deno.serve(async (req) => {
 
   // 4. PUT update
   const runId = crypto.randomUUID();
+  const marker = runMarker(runId);
+  html = `${html}\n${runMarkerHtml(runId)}`;
   await backupPostContent(postId, runId, originalRaw || raw, post?.status, post?.date_gmt);
   const updateBody: Record<string, unknown> = { content: html, status: "publish" };
   const finalMetaTitle = (typeof enriched.metaTitle === "string" && enriched.metaTitle.trim()) ? enriched.metaTitle.trim() : "";
@@ -497,36 +541,45 @@ Deno.serve(async (req) => {
   const verifyBody: any = verifyEdit.ok ? verifyEdit.body : updatedPost;
   const verifyContent = String(verifyBody?.content?.raw || verifyBody?.content?.rendered || "");
   const restHasSignals = containsAppliedSignal(verifyContent);
+  const restHasRunMarker = containsRunMarker(verifyContent, runId);
+  const savedPublished = String(verifyBody?.status || updatedPost?.status || "") === "publish";
   let liveHasContentSlot: boolean | null = null;
   let liveHasSignals = false;
+  let liveHasRunMarker = false;
+  let liveStatus: number | null = null;
+  let liveUrl = canonicalPublicUrl(String(updatedPost?.link || post?.link || ""));
   let visualReport: { score: number; checks: Record<string, boolean | number>; issues: string[] } | null = null;
-  try {
-    const link = String(updatedPost?.link || post?.link || "");
-    if (link) {
-      const liveRes = await fetch(`${link}${link.includes("?") ? "&" : "?"}_gutf_verify=${Date.now()}`, { headers: { "User-Agent": "GearupAudit/3.0", "Cache-Control": "no-cache" } });
-      if (liveRes.ok) {
-        const liveHtml = await liveRes.text();
-        liveHasContentSlot = hasLiveContentSlot(liveHtml);
-        liveHasSignals = containsAppliedSignal(liveHtml);
-        // Validate the live article zone, not the whole document
-        const articleZone = (() => {
-          const idx = liveHtml.search(/<(article|main)\b/i);
-          if (idx < 0) return liveHtml;
-          const tag = (liveHtml.slice(idx).match(/<(article|main)\b/i) || ["", "article"])[1].toLowerCase();
-          return findBalancedElement(liveHtml, tag, idx) || liveHtml;
-        })();
-        visualReport = visualValidate(articleZone);
-      }
+  if (liveUrl) {
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        const liveRes = await fetchLiveHtml(liveUrl, runId, attempt);
+        liveStatus = liveRes.status;
+        if (liveRes.ok) {
+          const liveHtml = liveRes.html;
+          liveHasContentSlot = hasLiveContentSlot(liveHtml);
+          liveHasSignals = containsAppliedSignal(liveHtml);
+          liveHasRunMarker = containsRunMarker(liveHtml, runId);
+          const articleZone = (() => {
+            const idx = liveHtml.search(/<(article|main)\b/i);
+            if (idx < 0) return liveHtml;
+            const tag = (liveHtml.slice(idx).match(/<(article|main)\b/i) || ["", "article"])[1].toLowerCase();
+            return findBalancedElement(liveHtml, tag, idx) || liveHtml;
+          })();
+          visualReport = visualValidate(articleZone);
+          if (liveHasRunMarker) break;
+        }
+      } catch { /* retry below */ }
+      await sleep(900 * attempt);
     }
-  } catch { /* live verification is best-effort */ }
-
-  if (!restHasSignals) {
-    await logEvent(postId, `Overhaul write failed verification; rolled back required (${changes.join(", ")})`, false);
-    return jsonRes({ ok: false, post_id: postId, changes, message: "WordPress accepted the request, but the saved post content did not contain the overhaul markers. No reliable live change was confirmed.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals }, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } }, 200);
   }
 
-  const visible = liveHasContentSlot !== false || liveHasSignals;
+  const verification = { rest_has_signals: restHasSignals, rest_has_run_marker: restHasRunMarker, saved_status_publish: savedPublished, live_url: liveUrl, live_status: liveStatus, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals, live_has_run_marker: liveHasRunMarker, run_marker: marker };
+  if (!savedPublished || !restHasSignals || !restHasRunMarker || !liveHasRunMarker) {
+    await logEvent(postId, `Overhaul not live-verified; saved=${savedPublished} rest_marker=${restHasRunMarker} live_marker=${liveHasRunMarker} (${changes.join(", ")})`, false);
+    return jsonRes({ ok: false, post_id: postId, changes, message: liveHasRunMarker ? "WordPress saved the overhaul, but publish status verification failed." : "WordPress accepted the update, but the public live post did not show this exact publish run after cache-busted re-fetch. Treating as NOT published/visible.", content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } }, 200);
+  }
+
   const visualScore = visualReport?.score ?? null;
-  await logEvent(postId, `Overhauled and verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"})`, true);
-  return jsonRes({ ok: true, post_id: postId, changes, message: visible ? `Applied, published, and verified (visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}` : "Saved and published in WordPress post content, but the live template does not appear to render post content. Check the Elementor/single-post template.", content_source: contentSource, wp_status: updateRes.status, verification: { rest_has_signals: restHasSignals, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals }, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
+  await logEvent(postId, `Overhauled and public-live verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"}; ${marker})`, true);
+  return jsonRes({ ok: true, post_id: postId, changes, message: `Applied, published, and verified on public live URL (visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}`, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
 });
