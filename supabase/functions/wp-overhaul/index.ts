@@ -1029,7 +1029,8 @@ Deno.serve(async (req) => {
   }
 
 
-  // 1b. Premium AI generation (SOTA, semantic, outranking content) — merged with caller fixes.
+  // 1b. Premium AI generation only when explicitly requested; otherwise use
+  // caller fixes + deterministic fallback to stay inside Edge memory limits.
   const enrichedRaw = premiumQuality ? await generatePremiumContent(post, raw, fixes) : (fixes || {});
   // KSES sanitization: strip <section>/<article> from any AI/caller HTML so the body
   // actually survives the WordPress REST update (Application Passwords lack unfiltered_html).
