@@ -206,6 +206,11 @@ function runMarker(runId: string): string {
   return `gutf-publish-run-${runId}`;
 }
 
+function runMarkerHtml(runId: string): string {
+  const marker = runMarker(runId);
+  return `<!--${marker}--><span class="gutf-publish-verification" data-gutf-run="${marker}" hidden></span>`;
+}
+
 function containsRunMarker(html: string, runId: string): boolean {
   return !!runId && String(html || "").includes(runMarker(runId));
 }
@@ -511,7 +516,7 @@ Deno.serve(async (req) => {
   // 4. PUT update
   const runId = crypto.randomUUID();
   const marker = runMarker(runId);
-  html = `${html}\n<!--${marker}-->`;
+  html = `${html}\n${runMarkerHtml(runId)}`;
   await backupPostContent(postId, runId, originalRaw || raw, post?.status, post?.date_gmt);
   const updateBody: Record<string, unknown> = { content: html, status: "publish" };
   const finalMetaTitle = (typeof enriched.metaTitle === "string" && enriched.metaTitle.trim()) ? enriched.metaTitle.trim() : "";
