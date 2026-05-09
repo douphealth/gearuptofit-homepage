@@ -1017,9 +1017,11 @@ Deno.serve(async (req) => {
   if (!postId) return jsonRes({ error: "post_id required" }, 400);
   const fixes = body.fixes || {};
   const dryRun = !!body.dry_run;
-  // Keep this function deterministic and memory-safe. AI generation happens in
-  // audit-generate-fixes; wp-overhaul only applies those fixes and local fallbacks.
-  const premiumQuality = false;
+  // Premium AI rewrite is opt-in and only safe on small posts to stay inside
+  // the Edge worker memory budget. Caller passes `premium_quality: true`; we
+  // additionally gate by raw size below once we've fetched the post.
+  const premiumRequested = body.premium_quality === true;
+  let premiumQuality = false;
 
   const user = Deno.env.get("WP_USERNAME");
   const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
