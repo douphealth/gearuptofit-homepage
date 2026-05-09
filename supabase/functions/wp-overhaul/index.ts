@@ -492,7 +492,7 @@ async function fetchLiveHtml(url: string, runId: string, attempt: number, cacheB
       Pragma: "no-cache",
     },
   });
-  return { ok: res.ok, status: res.status, url: cleanUrl, fetched_url: fetchUrl, html: res.ok ? await res.text() : await res.text().catch(() => "") };
+  return { ok: res.ok, status: res.status, url: cleanUrl, fetched_url: fetchUrl, html: await readLimitedText(res) };
 }
 
 async function verifyLiveVisibility(url: string, runId: string, exactRunRequired: boolean, attempts = 5, cacheBust = true) {
@@ -530,19 +530,19 @@ async function verifyLiveVisibility(url: string, runId: string, exactRunRequired
 async function verifyCanonicalAndBusted(url: string, runId: string, exactRunRequired: boolean, attempts = 5) {
   const canonicalUrl = cleanPublicUrl(url);
   // First confirm WordPress origin actually serves new content via cache-bust.
-  const busted = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, Math.max(2, Math.min(3, attempts)), true);
+  const busted = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, Math.max(1, Math.min(2, attempts)), true);
   let canonical = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, 1, false);
   const purges: any[] = [];
   let cfStatusFinal: string | null = null;
   let cfAgeFinal: string | null = null;
-  // Aggressive multi-round purge loop: purge → wait (exponential) → fetch CLEAN with cache-bypass headers → re-analyze.
-  // Up to 4 rounds with growing waits gives Cloudflare's edge time to converge globally.
-  for (let round = 1; round <= 4; round++) {
+  // Keep verification lightweight inside the Edge worker: one purge/check round is
+  // enough to prove the write while avoiding repeated full-page HTML downloads.
+  for (let round = 1; round <= 1; round++) {
     const okSoFar = canonical.live_body_ok && (!exactRunRequired || canonical.live_has_run_marker);
     if (okSoFar) break;
     const purge = await purgeCloudflareUrl(canonicalUrl, 2);
     purges.push({ round, ...purge });
-    await sleep(1500 * round + 1500); // 3s, 4.5s, 6s, 7.5s
+    await sleep(1200 * round);
     // Direct cache-bypass fetch on the CLEAN URL (no query params), then full analysis.
     try {
       const direct = await fetchCleanWithCacheBypass(canonicalUrl);
@@ -555,7 +555,7 @@ async function verifyCanonicalAndBusted(url: string, runId: string, exactRunRequ
       }
     } catch { /* */ }
     // Fallback: standard verify (some CDNs respect Cache-Control: no-cache from origin).
-    canonical = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, 2, false);
+    canonical = await verifyLiveVisibility(canonicalUrl, runId, exactRunRequired, 1, false);
   }
   const purge = purges[purges.length - 1] || null;
   const canonicalOk = !!canonical.live_body_ok && (!exactRunRequired || !!canonical.live_has_run_marker);
