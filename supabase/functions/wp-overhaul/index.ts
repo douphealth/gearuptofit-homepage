@@ -813,7 +813,7 @@ function visualValidate(liveHtml: string): { score: number; checks: Record<strin
   checks.has_faq_block = hasFaq;
   const hasBottomLine = /class=(['"])[^'"]*gutf-bottom-line[^'"]*\1/i.test(liveHtml);
   checks.has_bottom_line = hasBottomLine;
-  const hasResponsiveCss = /gutf-overhaul-v1/.test(liveHtml);
+  const hasResponsiveCss = /gutf-overhaul-v[12]/.test(liveHtml);
   checks.has_responsive_css = hasResponsiveCss; if (!hasResponsiveCss) issues.push("missing-responsive-css");
   let jsonLdValid = false;
   const ldMatch = liveHtml.match(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/i);
