@@ -383,7 +383,9 @@ function containsRunMarker(html: string, runId: string): boolean {
 
 const LIVE_MIN_VISIBLE_WORDS = 600;
 const LIVE_MIN_VISIBLE_H2 = 3;
-const MAX_HTML_READ_BYTES = 700_000;
+const MAX_HTML_READ_BYTES = 260_000;
+const MAX_WP_JSON_READ_BYTES = 520_000;
+const MAX_RAW_TRANSFORM_CHARS = 220_000;
 
 async function readLimitedText(res: Response, maxBytes = MAX_HTML_READ_BYTES): Promise<string> {
   if (!res.body) return await res.text().catch(() => "");
