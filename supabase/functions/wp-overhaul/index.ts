@@ -606,6 +606,28 @@ function countTag(html: string, tag: string): number {
   return (String(html || "").match(new RegExp(`<${tag}\\b`, "gi")) || []).length;
 }
 
+function countInternalLinks(html: string): number {
+  return (String(html || "").match(/<a\b[^>]*href=["']https:\/\/gearuptofit\.com\//gi) || []).length;
+}
+
+function ensureMinimumInternalLinks(ai: Record<string, any>, candidates: Array<{ url: string; title: string }>, minLinks: number): Record<string, any> {
+  if (!candidates.length) return ai;
+  const combined = `${ai.sectionsHtml || ""}\n${ai.faqHtml || ""}\n${ai.conclusionHtml || ""}`;
+  const existingCount = countInternalLinks(combined);
+  if (existingCount >= Math.min(minLinks, candidates.length)) return ai;
+
+  const alreadyUsed = new Set((combined.match(/https:\/\/gearuptofit\.com\/[^"'\s<>]+/gi) || []).map((u) => u.replace(/\/$/, "")));
+  const unused = candidates.filter((c) => c.url && c.title && !alreadyUsed.has(c.url.replace(/\/$/, "")));
+  const needed = Math.max(minLinks - existingCount, 1);
+  const selected = (unused.length ? unused : candidates).slice(0, Math.min(6, Math.max(4, needed)));
+  if (!selected.length) return ai;
+
+  const related = `<div class="gutf-related"><h3>Continue reading</h3><ul>${selected
+    .map((c) => `<li><a href="${escapeHtml(c.url)}">${escapeHtml(c.title)}</a></li>`)
+    .join("")}</ul></div>`;
+  return { ...ai, faqHtml: `${String(ai.faqHtml || "").trim()}\n${related}`.trim() };
+}
+
 // Pull a topical short-list of internal-link candidates from the cached WP corpus,
 // scored by token overlap against the source post's title/slug/keyword.
 async function fetchInternalLinkCandidates(post: any, fixes: Record<string, any>, max = 28): Promise<Array<{ url: string; title: string }>> {
