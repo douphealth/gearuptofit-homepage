@@ -233,6 +233,30 @@ function buildSeedContent(fixes: Record<string, any>): string {
   return blocks.length ? `<div class="gutf-article gutf-generated-overhaul">\n${blocks.join("\n")}\n</div>` : "";
 }
 
+function escapeHtml(value: unknown): string {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function stripTags(value: unknown): string {
+  return String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function buildEmergencySeed(post: any, fixes: Record<string, any>): string {
+  const title = stripTags(fixes.metaTitle || post?.title?.raw || post?.title?.rendered || "Updated article");
+  const excerpt = stripTags(fixes.metaDescription || post?.excerpt?.raw || post?.excerpt?.rendered || "This article has been refreshed for clarity, structure, and mobile readability.");
+  return `<div class="gutf-article gutf-generated-overhaul gutf-emergency-overhaul">
+<!--gutf:intro--><p>${escapeHtml(excerpt)}</p><!--/gutf:intro-->
+<h2>${escapeHtml(title)}</h2>
+<p>This post has been republished with a clean responsive structure so it can be stored directly in WordPress post content and rendered by any standard post template.</p>
+<!--gutf:bottom-line--><div class="gutf-bottom-line"><h2>Bottom Line</h2><p>${escapeHtml(excerpt)}</p></div><!--/gutf:bottom-line-->
+</div>`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
