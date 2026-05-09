@@ -479,8 +479,9 @@ Deno.serve(async (req) => {
 
     throw new Error(`Unknown mode: ${mode}`);
   } catch (e: any) {
+    const status = Number(e?.status) || 500;
     return new Response(JSON.stringify({ error: e.message }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
