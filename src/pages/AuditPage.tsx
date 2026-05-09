@@ -331,7 +331,20 @@ function Stat({ label, value, className = "" }: { label: string; value: number |
 }
 
 type LeakItem = { post_id: number; link: string; title: string; sample?: string; found?: boolean };
-type FixResult = { post_id: number; ok: boolean; removed_chars?: number; error?: string };
+type DiffSummary = {
+  chars_before: number; chars_after: number; chars_delta: number;
+  lines_added: number; lines_removed: number;
+  wrapper_tags_removed: number;
+  style_tags_before: number; style_tags_after: number; style_tags_added: number;
+};
+type FixResult = {
+  post_id: number; ok: boolean;
+  removed_chars?: number; error?: string;
+  http_status?: number; completed_at?: string;
+  published?: boolean; rolled_back?: boolean;
+  dry_run?: boolean; would_change?: boolean; would_publish?: boolean;
+  diff?: DiffSummary;
+};
 type Verdict = {
   verdict: "clean" | "stale_cache" | "real_leak" | "origin_only";
   liveUrl: string; liveStatus: number; liveBytes: number;
@@ -349,15 +362,26 @@ function downloadFile(name: string, content: string, mime: string) {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
 }
 function toCsv(rows: LeakItem[], results: FixResult[] | null): string {
-  const head = ["post_id", "title", "url", "fix_status", "removed_chars", "fix_error", "sample"];
+  const head = [
+    "post_id", "title", "url",
+    "fix_status", "publish_status", "http_code", "completed_at",
+    "removed_chars", "chars_delta", "wrapper_tags_removed", "style_tags_added",
+    "fix_error", "sample",
+  ];
   const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
   const lines = [head.join(",")];
   for (const it of rows) {
     const r = results?.find((x) => x.post_id === it.post_id);
     lines.push([
       it.post_id, it.title, it.link,
-      r ? (r.ok ? "fixed" : "failed") : "pending",
+      r ? (r.ok ? (r.dry_run ? "would_change" : (r.rolled_back ? "rolled_back" : "fixed")) : "failed") : "pending",
+      r?.published ? "published" : (r?.would_publish ? "would_publish" : ""),
+      r?.http_status ?? "",
+      r?.completed_at ?? "",
       r?.removed_chars ?? "",
+      r?.diff?.chars_delta ?? "",
+      r?.diff?.wrapper_tags_removed ?? "",
+      r?.diff?.style_tags_added ?? "",
       r?.error ?? "",
       it.sample ?? "",
     ].map(esc).join(","));
@@ -376,20 +400,63 @@ function BulkCleanupPanel() {
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [verifyResult, setVerifyResult] = useState<Verdict | null>(null);
   const [autoPublish, setAutoPublish] = useState(true);
+  const [autoRollback, setAutoRollback] = useState(true);
+  const [resumable, setResumable] = useState<{ phase: string; page: number; processed: number; updated_at: string } | null>(null);
+  const [runId] = useState(() => `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 
-  // Adaptive scan: starts at 50/page, halves to 10 on WORKER_RESOURCE_LIMIT,
-  // ramps back +10 every successful page up to 100. Keeps throughput high
-  // without breaking on the rare giant-content post that blew the 150MB cap.
+  const CKPT_KEY = "bulk-cleanup-default";
+
   const isResourceLimit = (msg: string) =>
     /WORKER_RESOURCE_LIMIT|546|compute resources|memory/i.test(msg || "");
 
-  const scan = async () => {
-    setScanning(true); setResults(null); setItems([]);
+  // On mount, look for an interrupted run.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await callAudit<{ checkpoint: any }>("wp-bulk-cleanup", { mode: "checkpoint_load", key: CKPT_KEY });
+        if (r.checkpoint) {
+          setResumable({
+            phase: r.checkpoint.phase,
+            page: r.checkpoint.page,
+            processed: (r.checkpoint.processed_ids || []).length,
+            updated_at: r.checkpoint.updated_at,
+          });
+        }
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
+  const saveCheckpoint = async (payload: Record<string, any>) => {
+    try { await callAudit("wp-bulk-cleanup", { mode: "checkpoint_save", key: CKPT_KEY, ...payload }); } catch { /* best-effort */ }
+  };
+  const clearCheckpoint = async () => {
+    try { await callAudit("wp-bulk-cleanup", { mode: "checkpoint_clear", key: CKPT_KEY }); } catch { /* best-effort */ }
+    setResumable(null);
+  };
+
+  const scan = async (resume = false) => {
+    setScanning(true);
     const MIN = 10, MAX = 100, RAMP = 10;
     let perPage = 50;
+    let startPage = 1;
+    let all: LeakItem[] = [];
+
+    if (resume) {
+      try {
+        const r = await callAudit<{ checkpoint: any }>("wp-bulk-cleanup", { mode: "checkpoint_load", key: CKPT_KEY });
+        if (r.checkpoint) {
+          startPage = Math.max(1, Number(r.checkpoint.page) || 1);
+          perPage = Math.max(MIN, Math.min(MAX, Number(r.checkpoint.per_page) || 50));
+          all = (r.checkpoint.affected as LeakItem[]) || [];
+        }
+      } catch { /* ignore */ }
+    } else {
+      setResults(null); setItems([]);
+    }
+    setItems([...all]);
+
     try {
-      const all: LeakItem[] = [];
-      let page = 1;
+      let page = startPage;
       let totalPages = 1;
       while (page <= 400) {
         let attempt = 0;
@@ -405,6 +472,7 @@ function BulkCleanupPanel() {
             setItems([...all]);
             setStatus(`Scanned page ${page}/${totalPages} · ${all.length} affected · ${perPage}/page`);
             if (perPage < MAX) perPage = Math.min(MAX, perPage + RAMP);
+            await saveCheckpoint({ phase: "scan", page: page + 1, per_page: perPage, total_pages: totalPages, affected: all });
             if (r.done) { page = totalPages + 1; break; }
             page++; break;
           } catch (e: any) {
@@ -418,30 +486,134 @@ function BulkCleanupPanel() {
           }
         }
       }
+      await clearCheckpoint();
       toast({ title: `Scan complete`, description: `${all.length} posts contain leaked CSS.` });
-    } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
+    } catch (e: any) {
+      toast({ title: "Scan stopped", description: `${e.message}. Checkpoint saved — click Resume to continue.`, variant: "destructive" });
+      setResumable({ phase: "scan", page: startPage, processed: all.length, updated_at: new Date().toISOString() });
+    }
     setStatus(""); setScanning(false);
   };
 
-  const fixAll = async () => {
+  // Dry-run: preview which posts would change without writing.
+  const dryRunAll = async () => {
     if (!items || items.length === 0) return;
-    const willPublish = autoPublish;
-    if (!confirm(`Re-wrap orphan CSS in ${items.length} post(s)?${willPublish ? " Each post will also be republished to flush CDN caches." : ""} The orphan CSS that currently shows as visible text at the top of these posts will be moved back inside a single <style> tag. Live posts are updated in place.`)) return;
     setFixing(true);
     try {
       const ids = items.map((i) => i.post_id);
       const all: FixResult[] = [];
       for (let i = 0; i < ids.length; i += 1) {
-        setStatus(`Fixing ${i + 1}/${ids.length} · post ${ids[i]}${willPublish ? " (+publish)" : ""}`);
-        const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]], publish: willPublish });
-        all.push(...r.results);
+        setStatus(`Dry-run ${i + 1}/${ids.length} · post ${ids[i]}`);
+        try {
+          const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]], dry_run: true, publish: autoPublish });
+          all.push(...r.results);
+        } catch (e: any) {
+          all.push({ post_id: ids[i], ok: false, error: e.message });
+        }
         setResults([...all]);
       }
-      setResults(all);
-      const ok = all.filter((r) => r.ok).length;
+      const wouldChange = all.filter((r) => r.ok && r.would_change).length;
+      const noChange = all.filter((r) => r.ok && !r.would_change).length;
+      toast({ title: `Dry-run complete`, description: `${wouldChange} would change, ${noChange} no-op. No posts modified.` });
+    } catch (e: any) { toast({ title: "Dry-run failed", description: e.message, variant: "destructive" }); }
+    setStatus(""); setFixing(false);
+  };
+
+  const rollbackBatch = async (ids: number[]): Promise<FixResult[]> => {
+    const out: FixResult[] = [];
+    for (let i = 0; i < ids.length; i += 1) {
+      setStatus(`Rollback ${i + 1}/${ids.length} · post ${ids[i]}`);
+      try {
+        const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "rollback", post_ids: [ids[i]] });
+        out.push(...r.results);
+      } catch (e: any) {
+        out.push({ post_id: ids[i], ok: false, error: e.message });
+      }
+    }
+    return out;
+  };
+
+  const rollbackAllSucceeded = async () => {
+    if (!results) return;
+    const ids = results.filter((r) => r.ok && !r.dry_run && !r.rolled_back).map((r) => r.post_id);
+    if (!ids.length) { toast({ title: "Nothing to rollback" }); return; }
+    if (!confirm(`Rollback ${ids.length} post(s) to their pre-fix backup?`)) return;
+    setFixing(true);
+    const r = await rollbackBatch(ids);
+    setResults((prev) => (prev || []).map((p) => {
+      const m = r.find((x) => x.post_id === p.post_id);
+      return m ? { ...p, ...m } : p;
+    }));
+    const ok = r.filter((x) => x.ok).length;
+    toast({ title: `Rollback done`, description: `${ok}/${ids.length} restored.` });
+    setStatus(""); setFixing(false);
+  };
+
+  const fixAll = async (resume = false) => {
+    if (!items || items.length === 0) return;
+    const willPublish = autoPublish;
+    if (!resume && !confirm(`Re-wrap orphan CSS in ${items.length} post(s)?${willPublish ? " Each post will also be republished to flush CDN caches." : ""}${autoRollback ? " On failure, successfully-fixed posts will be auto-rolled-back." : ""}`)) return;
+    setFixing(true);
+
+    let processed: number[] = [];
+    let priorResults: FixResult[] = results || [];
+    if (resume) {
+      try {
+        const r = await callAudit<{ checkpoint: any }>("wp-bulk-cleanup", { mode: "checkpoint_load", key: CKPT_KEY });
+        if (r.checkpoint?.phase === "fix") {
+          processed = (r.checkpoint.processed_ids as number[]) || [];
+          priorResults = (r.checkpoint.results as FixResult[]) || priorResults;
+          setResults([...priorResults]);
+        }
+      } catch { /* ignore */ }
+    }
+
+    try {
+      const ids = items.map((i) => i.post_id).filter((id) => !processed.includes(id));
+      const all: FixResult[] = [...priorResults];
+      const succeededThisBatch: number[] = [];
+      for (let i = 0; i < ids.length; i += 1) {
+        setStatus(`Fixing ${i + 1}/${ids.length} · post ${ids[i]}${willPublish ? " (+publish)" : ""}`);
+        try {
+          const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", {
+            mode: "fix", post_ids: [ids[i]], publish: willPublish, run_id: runId,
+          });
+          all.push(...r.results);
+          if (r.results[0]?.ok && !r.results[0]?.dry_run) succeededThisBatch.push(ids[i]);
+          setResults([...all]);
+          processed.push(ids[i]);
+          await saveCheckpoint({ phase: "fix", page: 1, processed_ids: processed, affected: items, results: all });
+
+          if (!r.results[0]?.ok && autoRollback && succeededThisBatch.length > 0) {
+            toast({ title: `Post ${ids[i]} failed`, description: `Auto-rolling back ${succeededThisBatch.length} previously-fixed post(s).`, variant: "destructive" });
+            const rb = await rollbackBatch(succeededThisBatch);
+            const merged = all.map((p) => {
+              const m = rb.find((x) => x.post_id === p.post_id);
+              return m ? { ...p, rolled_back: m.ok } : p;
+            });
+            setResults(merged);
+            throw new Error(`Halted at post ${ids[i]}. Batch rolled back.`);
+          }
+        } catch (e: any) {
+          if (autoRollback && succeededThisBatch.length > 0 && !/Halted/.test(e.message)) {
+            const rb = await rollbackBatch(succeededThisBatch);
+            const merged = all.map((p) => {
+              const m = rb.find((x) => x.post_id === p.post_id);
+              return m ? { ...p, rolled_back: m.ok } : p;
+            });
+            setResults(merged);
+          }
+          throw e;
+        }
+      }
+      await clearCheckpoint();
+      const ok = all.filter((r) => r.ok && !r.rolled_back && !r.dry_run).length;
       const failed = all.filter((r) => !r.ok).length;
       toast({ title: `Cleanup done`, description: `${ok} fixed, ${failed} failed${willPublish ? `, republished` : ""}.` });
-    } catch (e: any) { toast({ title: "Cleanup failed", description: e.message, variant: "destructive" }); }
+    } catch (e: any) {
+      toast({ title: "Cleanup interrupted", description: `${e.message}. Click Resume to continue.`, variant: "destructive" });
+      setResumable({ phase: "fix", page: 0, processed: processed.length, updated_at: new Date().toISOString() });
+    }
     setStatus(""); setFixing(false);
   };
 
@@ -544,20 +716,35 @@ function BulkCleanupPanel() {
             <p className="text-xs text-muted-foreground mt-1">Scans every published post for orphan CSS rendered as visible text (the <code>.gutf-article {`{ ... !important }`}</code> block at the top of posts). The fix re-wraps the orphan CSS in a single <code>&lt;style&gt;</code> tag inside the post — preserving the design, removing the visible leak.</p>
           </div>
           <div className="flex gap-2 flex-wrap items-center">
-            <Button size="sm" variant="outline" onClick={scan} disabled={scanning || fixing}>
+            <Button size="sm" variant="outline" onClick={() => scan(false)} disabled={scanning || fixing}>
               {scanning ? <Loader2 className="size-4 animate-spin mr-2" /> : <RefreshCw className="size-4 mr-2" />}
               {scanning && status ? status : "Scan all posts"}
             </Button>
-            <Button size="sm" variant="destructive" onClick={fixAll} disabled={fixing || scanning || !items || items.length === 0}>
+            <Button size="sm" variant="secondary" onClick={dryRunAll} disabled={fixing || scanning || !items || items.length === 0} title="Preview which posts would change without writing anything">
+              Dry-run {items?.length ?? 0}
+            </Button>
+            <Button size="sm" variant="destructive" onClick={() => fixAll(false)} disabled={fixing || scanning || !items || items.length === 0}>
               {fixing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
               {fixing && status ? status : `Fix ${items?.length ?? 0} posts`}
             </Button>
             <Button size="sm" variant="default" onClick={publishAll} disabled={fixing || scanning || !items || items.length === 0} title="Force-republish (bumps modified date, purges CDN). Does not modify content.">
               Republish {items?.length ?? 0}
             </Button>
+            <Button size="sm" variant="outline" onClick={rollbackAllSucceeded} disabled={fixing || scanning || !results?.some((r) => r.ok && !r.dry_run && !r.rolled_back)} title="Restore previously-fixed posts to their pre-fix backup">
+              Rollback fixed
+            </Button>
+            {resumable && (
+              <Button size="sm" variant="default" onClick={() => (resumable.phase === "fix" ? fixAll(true) : scan(true))} disabled={scanning || fixing} title={`Resume interrupted ${resumable.phase} from ${resumable.updated_at}`}>
+                Resume {resumable.phase} ({resumable.processed} done)
+              </Button>
+            )}
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none ml-1">
               <input type="checkbox" checked={autoPublish} onChange={(e) => setAutoPublish(e.target.checked)} className="size-3.5 accent-primary" />
               Auto-publish on Fix
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+              <input type="checkbox" checked={autoRollback} onChange={(e) => setAutoRollback(e.target.checked)} className="size-3.5 accent-primary" />
+              Auto-rollback on failure
             </label>
             <Button size="sm" variant="outline" onClick={exportCsv} disabled={!items || items.length === 0}>Export CSV</Button>
             <Button size="sm" variant="outline" onClick={exportJson} disabled={!items || items.length === 0}>Export JSON</Button>
@@ -627,21 +814,50 @@ function BulkCleanupPanel() {
           <div className="text-sm text-emerald-500">No posts contain leaked CSS. ✓</div>
         )}
         {items && items.length > 0 && (
-          <div className="overflow-x-auto border rounded-md max-h-72">
+          <div className="overflow-x-auto border rounded-md max-h-96">
             <table className="w-full text-xs">
               <thead className="bg-muted/40 text-left sticky top-0">
-                <tr><th className="p-2">ID</th><th className="p-2">Title</th><th className="p-2">Result</th></tr>
+                <tr>
+                  <th className="p-2">ID</th>
+                  <th className="p-2">Title</th>
+                  <th className="p-2">Result</th>
+                  <th className="p-2">Publish</th>
+                  <th className="p-2">HTTP</th>
+                  <th className="p-2">Diff</th>
+                  <th className="p-2">When</th>
+                </tr>
               </thead>
               <tbody>
                 {items.map((it) => {
                   const res = results?.find((r) => r.post_id === it.post_id);
+                  const ts = res?.completed_at ? new Date(res.completed_at).toLocaleTimeString() : "";
                   return (
                     <tr key={it.post_id} className="border-t">
                       <td className="p-2 font-medium">{it.post_id}</td>
                       <td className="p-2"><a className="text-primary hover:underline" href={it.link} target="_blank" rel="noreferrer">{it.title}</a></td>
                       <td className="p-2">
-                        {res ? (res.ok ? <span className="text-emerald-500">✓ removed {res.removed_chars}c</span> : <span className="text-destructive">✗ {res.error}</span>) : <span className="text-muted-foreground">pending</span>}
+                        {!res ? <span className="text-muted-foreground">pending</span>
+                          : res.dry_run ? (res.would_change
+                              ? <span className="text-amber-500">would change · −{res.removed_chars}c</span>
+                              : <span className="text-muted-foreground">no change</span>)
+                          : res.rolled_back ? <span className="text-amber-500">↺ rolled back</span>
+                          : res.ok ? <span className="text-emerald-500">✓ removed {res.removed_chars}c</span>
+                          : <span className="text-destructive">✗ {res.error}</span>}
                       </td>
+                      <td className="p-2">
+                        {res?.published ? <Badge variant="secondary">published</Badge>
+                          : res?.would_publish ? <Badge variant="outline">would publish</Badge>
+                          : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="p-2 font-mono">
+                        {res?.http_status ? (
+                          <span className={res.http_status >= 200 && res.http_status < 300 ? "text-emerald-500" : "text-destructive"}>{res.http_status}</span>
+                        ) : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="p-2 text-muted-foreground">
+                        {res?.diff ? `Δ${res.diff.chars_delta}c · −${res.diff.wrapper_tags_removed}p · +${res.diff.style_tags_added}<style>` : "—"}
+                      </td>
+                      <td className="p-2 text-muted-foreground">{ts || "—"}</td>
                     </tr>
                   );
                 })}

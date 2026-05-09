@@ -140,6 +140,45 @@ export type Database = {
         }
         Relationships: []
       }
+      wp_cleanup_checkpoints: {
+        Row: {
+          affected: Json
+          created_at: string
+          key: string
+          page: number
+          per_page: number
+          phase: string
+          processed_ids: number[]
+          results: Json
+          total_pages: number | null
+          updated_at: string
+        }
+        Insert: {
+          affected?: Json
+          created_at?: string
+          key: string
+          page?: number
+          per_page?: number
+          phase?: string
+          processed_ids?: number[]
+          results?: Json
+          total_pages?: number | null
+          updated_at?: string
+        }
+        Update: {
+          affected?: Json
+          created_at?: string
+          key?: string
+          page?: number
+          per_page?: number
+          phase?: string
+          processed_ids?: number[]
+          results?: Json
+          total_pages?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       wp_import_pages: {
         Row: {
           error: string | null
@@ -226,6 +265,36 @@ export type Database = {
           started_at?: string
           status?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      wp_post_backups: {
+        Row: {
+          content: string
+          created_at: string
+          date_gmt: string | null
+          id: number
+          post_id: number
+          run_id: string | null
+          status: string | null
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          date_gmt?: string | null
+          id?: number
+          post_id: number
+          run_id?: string | null
+          status?: string | null
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          date_gmt?: string | null
+          id?: number
+          post_id?: number
+          run_id?: string | null
+          status?: string | null
         }
         Relationships: []
       }
