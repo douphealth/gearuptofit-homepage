@@ -261,6 +261,7 @@ async function suggestForPost(supabase: any, sourceId: number, max = 6): Promise
   const linked = existingLinks(html);
 
   const corpus = await loadCorpus(supabase, sourceId);
+  const safeSpans = precomputeSafeSpans(html); // compute regex-heavy spans ONCE
 
   // Score each candidate
   const scored: Suggestion[] = [];
@@ -276,7 +277,7 @@ async function suggestForPost(supabase: any, sourceId: number, max = 6): Promise
 
     const phrases = buildCandidatePhrases({ title: targetTitle, slug: t.slug || "" });
     if (!phrases.length) continue;
-    const hit = findBestInsertion(html, phrases);
+    const hit = findBestInsertion(safeSpans, phrases);
     if (!hit) continue;
 
     // Freshness boost
