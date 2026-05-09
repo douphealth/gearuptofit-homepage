@@ -191,15 +191,45 @@ Deno.serve(async (req) => {
         "";
     }
   }
+  // Last-resort fallback: fetch the public post HTML from APEX and extract <article> / main content
+  if (!raw.trim()) {
+    try {
+      const link: string | undefined = post?.link;
+      if (link) {
+        const pageRes = await fetch(link, { headers: { "User-Agent": "GearupAudit/3.0", "Cache-Control": "no-cache" } });
+        if (pageRes.ok) {
+          const pageHtml = await pageRes.text();
+          // Extract <article>...</article> or fall back to <main>
+          const articleMatch = pageHtml.match(/<article\b[\s\S]*?<\/article>/i);
+          const mainMatch = !articleMatch ? pageHtml.match(/<main\b[\s\S]*?<\/main>/i) : null;
+          const extracted = articleMatch?.[0] || mainMatch?.[0] || "";
+          // Strip script/style/header/footer/nav/aside to keep just content
+          if (extracted) {
+            raw = extracted
+              .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+              .replace(/<style\b[\s\S]*?<\/style>/gi, "")
+              .replace(/<header\b[\s\S]*?<\/header>/gi, "")
+              .replace(/<footer\b[\s\S]*?<\/footer>/gi, "")
+              .replace(/<nav\b[\s\S]*?<\/nav>/gi, "");
+          }
+        }
+      }
+    } catch { /* ignore */ }
+  }
   if (!raw.trim()) {
     const diag = `status=${post?.status} hasContent=${!!post?.content} keys=${post?.content ? Object.keys(post.content).join(",") : "none"}`;
-    await logEvent(postId, `Skipped: empty content (${diag})`, false);
+    await logEvent(postId, `Skipped: empty content (${diag})`, true);
+    // Return 200 with skipped flag so the UI doesn't surface a runtime error / blank screen.
+    // This commonly happens when a post is built entirely by a page-builder (Elementor/Divi/Bricks)
+    // that stores HTML in post meta instead of post_content.
     return jsonRes({
-      ok: false,
+      ok: true,
+      skipped: true,
       post_id: postId,
-      error: "Empty content from WordPress REST API",
-      detail: `The post returned no content.raw or content.rendered. ${diag}. This usually means the WordPress Application Password user lacks 'edit_posts' capability on this post, or the post is built entirely with a page-builder that stores content outside the standard 'post_content' column (Elementor, Divi, Bricks, etc.).`,
-    }, 422);
+      changes: ["skipped-empty"],
+      reason: "page-builder-or-empty",
+      detail: `Post has no content in WP REST (${diag}). Likely built with a page-builder (Elementor/Divi/Bricks) that stores HTML outside post_content. Edit this post manually in WordPress.`,
+    });
   }
 
   // 2. Visual transforms
