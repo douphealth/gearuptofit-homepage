@@ -317,25 +317,31 @@ async function applyToLivePost(supabase: any, postId: number, suggestions: Sugge
   let raw: string = post?.content?.raw || "";
   if (!raw) throw new Error("Empty raw content");
 
-  // Existing autolink markers in raw content (live source of truth) +
-  // any markers we've already persisted in DB for this post (defensive).
+  // SOURCE OF TRUTH = live raw content. The DB autolink_markers table is a
+  // passive audit log only — never a dedupe gate. (A prior overhaul can wipe
+  // the live <a> tags + marker comments while DB rows linger; gating on DB
+  // would then permanently block re-insertion.)
   const liveRanges = autolinkMarkerRanges(raw);
   const existingTargets = new Set<number>(liveRanges.map((r) => r.targetId));
-  const { data: storedMarkers } = await supabase
-    .from("autolink_markers").select("target_id").eq("post_id", postId);
-  for (const m of storedMarkers || []) existingTargets.add(Number(m.target_id));
-
   const linked = existingLinks(raw);
   const usedAnchors = new Set<string>();
-  // Live ranges mutate as we insert — keep working copy
   const ranges: Array<{ start: number; end: number }> = liveRanges.map((r) => ({ start: r.start, end: r.end }));
   const applied: Array<{ anchor: string; targetUrl: string; targetId: number; start: number; end: number }> = [];
+  const skipped: Array<{ targetId: number; anchor: string; targetUrl: string; reason: string }> = [];
 
   for (const s of suggestions) {
-    if (existingTargets.has(s.targetId)) continue;
-    if (linked.has(normalizeUrl(s.targetUrl))) continue;
-    if (usedAnchors.has(s.anchor.toLowerCase())) continue;
-    if (raw.includes(`href="${s.targetUrl}"`) || raw.includes(`href='${s.targetUrl}'`)) continue;
+    if (existingTargets.has(s.targetId)) {
+      skipped.push({ targetId: s.targetId, anchor: s.anchor, targetUrl: s.targetUrl, reason: "marker_in_live" }); continue;
+    }
+    if (linked.has(normalizeUrl(s.targetUrl))) {
+      skipped.push({ targetId: s.targetId, anchor: s.anchor, targetUrl: s.targetUrl, reason: "already_linked_in_live" }); continue;
+    }
+    if (usedAnchors.has(s.anchor.toLowerCase())) {
+      skipped.push({ targetId: s.targetId, anchor: s.anchor, targetUrl: s.targetUrl, reason: "duplicate_anchor_in_run" }); continue;
+    }
+    if (raw.includes(`href="${s.targetUrl}"`) || raw.includes(`href='${s.targetUrl}'`)) {
+      skipped.push({ targetId: s.targetId, anchor: s.anchor, targetUrl: s.targetUrl, reason: "already_linked_in_live" }); continue;
+    }
 
     const phrase = s.anchor;
     const re = new RegExp(`\\b${escapeRegex(phrase)}\\b`, "i");
@@ -378,10 +384,46 @@ async function applyToLivePost(supabase: any, postId: number, suggestions: Sugge
       }
       cursor = matchEnd;
     }
-    if (!inserted) continue;
+    if (!inserted) {
+      skipped.push({ targetId: s.targetId, anchor: s.anchor, targetUrl: s.targetUrl, reason: "anchor_not_found_or_inside_heading_or_link" });
+    }
   }
 
-  if (!applied.length) return { applied: 0, links: [] };
+  // Reconcile stale DB markers BEFORE early-return so the audit log self-heals
+  // even when an apply run inserts nothing (e.g. all anchors already in live).
+  let reconciled_stale_markers = 0;
+  try {
+    const { data: storedMarkers } = await supabase
+      .from("autolink_markers").select("id, target_id").eq("post_id", postId);
+    const liveTargetIds = new Set<number>(autolinkMarkerRanges(raw).map((r) => r.targetId));
+    // Also count any href that points to the target URL as "live" — handles
+    // the case where markers were stripped but the <a> tag survived.
+    const liveHrefs = existingLinks(raw);
+    const staleIds: number[] = [];
+    for (const m of storedMarkers || []) {
+      if (liveTargetIds.has(Number(m.target_id))) continue;
+      // We'd need URL to cross-check hrefs, but target_id alone is enough:
+      // if the marker comment is gone AND we have no record of its URL in
+      // liveHrefs we still can't be 100% sure — fetch target_url too.
+      staleIds.push(Number((m as any).id));
+    }
+    if (staleIds.length) {
+      // Refine: only delete rows whose target_url is also absent from liveHrefs
+      const { data: full } = await supabase
+        .from("autolink_markers").select("id, target_url").in("id", staleIds);
+      const trulyStale = (full || [])
+        .filter((r: any) => !liveHrefs.has(normalizeUrl(r.target_url)))
+        .map((r: any) => r.id);
+      if (trulyStale.length) {
+        await supabase.from("autolink_markers").delete().in("id", trulyStale);
+        reconciled_stale_markers = trulyStale.length;
+      }
+    }
+  } catch { /* non-fatal */ }
+
+  if (!applied.length) {
+    return { applied: 0, links: [], skipped, reconciled_stale_markers };
+  }
 
   const updateRes = await fetch(`${WP_BASE}/posts/${postId}`, {
     method: "POST",
@@ -405,7 +447,7 @@ async function applyToLivePost(supabase: any, postId: number, suggestions: Sugge
     })),
   );
 
-  return { applied: applied.length, links: applied };
+  return { applied: applied.length, links: applied, skipped, reconciled_stale_markers };
 }
 
 Deno.serve(async (req) => {

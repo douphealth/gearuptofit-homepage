@@ -1,138 +1,79 @@
+# Why "0 internal links applied"
 
-# SEO Content Audit Dashboard for gearuptofit.com
+I traced it in the database. Here is exactly what happened to the HIIT post (`37656`):
 
-## Goal
-A private, password-protected `/audit` route inside this Lovable app that continuously audits every WordPress post on gearuptofit.com, gives each one an SEO/AEO/GEO score, generates AI-powered fixes, and pushes improvements back to WordPress **as Drafts only** — so nothing on the live site can break.
-
----
-
-## How It Works (end-to-end)
-
-```text
- WordPress (gearuptofit.com)        Lovable Audit Dashboard
- ─────────────────────────          ───────────────────────
- wp-json/wp/v2/posts  ──READ──►   1. Fetch all posts
-                                   2. Score each (20 signals)
-                                   3. Show ranked fix-list
-                                   4. Click "Generate Fixes" → AI
-                                   5. Click "Push as Draft" ──WRITE──►  Drafts inbox in WP
-                                                                         (you publish manually)
+```
+2026-05-09 16:16:30  →  Inserted 8 internal link(s)   ✅ (real, succeeded)
+2026-05-09 16:17:36  →  Inserted 0 internal link(s)   ❌ (this run)
 ```
 
-Two channels:
-- **READ** = public REST API (`/wp-json/wp/v2/posts`) — no auth, zero risk.
-- **WRITE** = WordPress Application Password over HTTPS, scoped to **Draft status only**. You always click "Update / Publish" inside WordPress yourself.
+The first run actually **did insert all 8 internal links** into the live WordPress post. It also wrote 8 rows into the `autolink_markers` table as an audit/dedupe log (those rows are still there for targets `71338, 66943, 37496, 39473, 66951, 76139, 52897, 54395`).
 
----
+Then you ran the SOTA overhaul. The overhaul **rewrites the entire post content**, which wiped all 8 `<a>` tags and their `<!--gutf:autolink-XXXX-->` marker comments out of the live post.
 
-## Safety Guarantees (the "without breaking anything" part)
+When you clicked "Apply" again, `applyToLivePost` loaded the dedupe set from `autolink_markers`:
 
-| Layer | Guarantee |
-|---|---|
-| Default mode | Read-only. Writes disabled until you flip a toggle. |
-| Write scope | Hard-coded to `status: 'draft'`. The code path that publishes is removed entirely. |
-| Originals | Never touched. Drafts are new revisions; you can discard them. |
-| Schema (JSON-LD) | Validated against schema.org before being shown. |
-| Internal links | Cross-checked against live sitemap so no broken links. |
-| AI cost control | Per-post button (you trigger). No bulk auto-rewrites. |
-| Cloudflare safe | Uses standard WP REST endpoints + WAF-friendly headers. |
-| Access | `/audit` route gated behind a password (Lovable Cloud-stored). |
+```ts
+const { data: storedMarkers } = await supabase
+  .from("autolink_markers").select("target_id").eq("post_id", postId);
+for (const m of storedMarkers || []) existingTargets.add(Number(m.target_id));
+```
 
----
+Every one of the 8 suggestions matched a `target_id` already in that set, so every single one was skipped → `applied: 0`. The DB log lied to the dedupe layer because the live content no longer contains those links.
 
-## What Gets Built
+# The fix
 
-### 1. Auth gate (`/audit` route)
-- Single password screen (password stored as Lovable Cloud secret `AUDIT_PASSWORD`).
-- Session kept in `sessionStorage`. Logout button.
+Make **live WordPress content the single source of truth**. The DB `autolink_markers` table becomes a passive audit log only — never a gate.
 
-### 2. WordPress data layer
-Edge function `wp-fetch-posts`:
-- Pages through `/wp-json/wp/v2/posts?per_page=100&_embed` until all posts retrieved.
-- Caches results in Lovable Cloud DB table `wp_posts_cache` (15-min TTL).
-- Stores: id, slug, title, content, excerpt, modified date, categories, tags, featured image, author, yoast meta (if exposed).
+## 1. `supabase/functions/audit-link-optimizer/index.ts` → `applyToLivePost()`
 
-### 3. SEO Scoring engine (`src/lib/seoScorer.ts`)
-Each post scored 0–100 across:
-- **Technical**: title length, meta desc length, slug quality, H1/H2 hierarchy, image alt text, WebP usage, internal/external link counts.
-- **Content**: word count, readability (Flesch), keyword presence, semantic coverage, freshness (months since update).
-- **AEO/GEO**: FAQ schema present, JSON-LD type, "answer-style" intro, listicle/HowTo structure.
-- **E-E-A-T**: author bio, citations, "last updated" visible.
-- **Cannibalization**: cosine-similarity between post titles/topics flags duplicates.
+- **Remove** the block that pre-fills `existingTargets` from `autolink_markers`. That table must not influence dedupe.
+- Keep the live-source dedupe (already correct):
+  - `autolinkMarkerRanges(raw)` — real `<!--gutf:autolink-ID-->...<!--/...-->` comments still in raw.
+  - `existingLinks(raw)` — any `href` already pointing at the target URL.
+  - `raw.includes('href="${s.targetUrl}"')` belt-and-suspenders check.
+- After a successful save, **reconcile** `autolink_markers` for this `post_id`:
+  1. Delete rows whose `target_id` is NOT in the freshly-saved `raw` (they were wiped by an earlier overhaul or manual edit).
+  2. Insert one row per target newly inserted in this run (current behavior).
+- Track skip reasons per suggestion and return them so the UI can explain "0 applied" instead of going silent. Reasons: `already_linked_in_live`, `marker_in_live`, `anchor_inside_heading_or_link`, `anchor_not_found`, `duplicate_anchor_in_run`.
 
-Output per post: score, list of issues (severity: critical / high / polish), recommended actions.
+## 2. `supabase/functions/audit-link-optimizer/index.ts` → response shape
 
-### 4. Dashboard UI (`/audit`)
-- **Overview**: site-wide health score, distribution chart, count of critical issues.
-- **Posts table**: sortable by score, filters by category / severity / freshness. Search.
-- **Post detail drawer**: full audit, before/after preview, fix list with checkboxes.
-- **Content gap finder**: lists topics competitors rank for that you don't (uses target-keyword input later).
-- **Decay tracker**: posts whose score dropped vs. last scan.
+Return:
 
-### 5. AI fix generator (Lovable AI Gateway, `google/gemini-2.5-flash`)
-Edge function `audit-generate-fixes` produces, per post:
-- Rewritten meta title (≤60 chars) + meta description (≤155 chars).
-- Improved intro paragraph (hook + primary keyword in first 100 words).
-- 5–10 FAQ block (question + answer).
-- JSON-LD schema (Article / Review / HowTo / FAQPage as appropriate).
-- Internal-link suggestions (post → 3–5 related posts on your site).
-- Alt text for every image missing one.
-- Suggested new H2/H3 outline if content is thin.
+```json
+{
+  "ok": true,
+  "applied": 8,
+  "links": [...],
+  "skipped": [
+    { "targetId": 71338, "anchor": "Interval Training", "reason": "marker_in_live" }
+  ],
+  "reconciled_stale_markers": 8
+}
+```
 
-All output is shown in a diff viewer. You approve each piece individually.
+When `applied === 0`, the response also includes a top-level human-readable `summary` like `"0 of 8 suggestions inserted — all already linked in live content"` so the UI can surface it.
 
-### 6. WordPress Draft Push (Pro feature)
-Edge function `wp-push-draft`:
-- Auth: WordPress Application Password (you create one in WP → Users → Profile → Application Passwords). Stored as secret `WP_APP_PASSWORD` + `WP_USERNAME`.
-- Endpoint: `POST /wp-json/wp/v2/posts/{id}` with `{ status: 'draft', content, excerpt, meta }`.
-- **Hardcoded `status: 'draft'`** — never `publish`.
-- Returns the WP draft URL so you can jump into WP and review.
-- Activity log table records every push.
+## 3. `src/pages/AuditPage.tsx` (autolink result block only)
 
-### 7. Scheduled re-scans
-Cron edge function `audit-weekly-scan` runs every Monday:
-- Re-fetches all posts, re-scores, diffs against last week.
-- Writes a "Decay report" row to DB.
-- Dashboard shows "5 posts dropped score this week" alert.
+When the apply call returns, instead of just toasting "Applied N", render:
 
----
+- `Applied: N`
+- `Reconciled stale markers: M` (only if > 0)
+- A small collapsible list of `skipped[]` with reason chips per suggestion.
 
-## Why This Drives Long-Term Organic Traffic
+Pure presentation — no business-logic changes outside the edge function. Other features (overhaul, audit, verification) are untouched.
 
-1. **Freshness loop** — Google rewards updated content. Weekly decay alerts mean nothing rots.
-2. **AEO/GEO ready** — FAQ + JSON-LD schema = eligibility for AI Overviews, ChatGPT citations, Perplexity sources.
-3. **Topical authority** — Internal-link suggestions tighten clusters around your 6 pillars.
-4. **No cannibalization** — Duplicate-topic detector flags posts that compete with each other.
-5. **E-E-A-T signals** — Author, citations, last-updated dates added systematically.
-6. **Core Web Vitals** — WebP + alt-text fixes improve Lighthouse scores.
-7. **Continuous, not one-shot** — The dashboard is a permanent operating system, not a one-time clean-up.
+## Why this is correct
 
----
+- Live HTML is the only source that cannot lie. If a `<!--gutf:autolink-71338-->` is not in `raw`, the link does not exist, period — and we are free to insert it.
+- Reconciliation cleans the stale DB rows your earlier overhaul orphaned, so the audit log stays honest going forward.
+- The skip-reason payload guarantees you will never again see an unexplained "0 applied".
 
-## Technical Section
+## Files to touch
 
-**Stack additions:**
-- Lovable Cloud (already enabled? — will enable if not) for: auth-gate password, edge functions, DB tables, secrets.
-- Tables: `wp_posts_cache`, `audit_scores`, `audit_history`, `push_log`.
-- Edge functions: `wp-fetch-posts`, `audit-generate-fixes`, `wp-push-draft`, `audit-weekly-scan` (cron).
-- Secrets: `AUDIT_PASSWORD`, `WP_USERNAME`, `WP_APP_PASSWORD`.
-- Lovable AI Gateway for all AI generation (no external OpenAI key needed).
-- Frontend: new `/audit` route, components reusing existing dark/red design tokens.
+- `supabase/functions/audit-link-optimizer/index.ts` (apply mode + response)
+- `src/pages/AuditPage.tsx` (autolink result rendering only)
 
-**What you do once before first push:**
-1. WordPress → Users → Your Profile → Application Passwords → create one named "Lovable Audit" → copy the 24-char password.
-2. Paste it into the secret prompt I'll trigger.
-3. Done. Read-only audit works without this; only the "Push as Draft" button needs it.
-
-**Build order:**
-1. Auth gate + `/audit` shell.
-2. WP fetch + cache + scoring engine.
-3. Dashboard UI (table + detail drawer).
-4. AI fix generator.
-5. WP draft push + activity log.
-6. Weekly cron scan + decay alerts.
-
-**Out of scope (intentionally):**
-- No auto-publishing. Ever.
-- No editing live HTML/CSS/theme files of WordPress.
-- No plugin install/deactivation (that's the wp-admin issue you had — separate Cloudflare problem).
+No DB migration. No new secrets. No changes to overhaul, scoring, verification, or suggestion generation.

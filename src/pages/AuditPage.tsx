@@ -1074,7 +1074,7 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
   const [overhaulResult, setOverhaulResult] = useState<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any; visual?: any; body_word_count?: number; body_h2_count?: number } | null>(null);
   const [linkSugs, setLinkSugs] = useState<any[] | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
-  const [linkApplied, setLinkApplied] = useState<{ applied: number; links: any[] } | null>(null);
+  const [linkApplied, setLinkApplied] = useState<{ applied: number; links: any[]; skipped?: any[]; reconciled_stale_markers?: number } | null>(null);
 
   useEffect(() => { setFixes(null); setOverhaulResult(null); setLinkSugs(null); setLinkApplied(null); }, [post?.post_id]);
 
@@ -1138,11 +1138,14 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
     if (!confirm(`Insert ${linkSugs.length} internal link(s) directly into LIVE post ${post.post_id}? Idempotent — re-running won't duplicate.`)) return;
     setLinkBusy(true);
     try {
-      const r = await callAudit<{ applied: number; links: any[] }>("audit-link-optimizer", {
+      const r = await callAudit<{ applied: number; links: any[]; skipped?: any[]; reconciled_stale_markers?: number }>("audit-link-optimizer", {
         mode: "apply", post_id: post.post_id, suggestions: linkSugs, max: linkSugs.length,
       });
-      setLinkApplied({ applied: r.applied, links: r.links });
-      toast({ title: `Inserted ${r.applied} link(s)`, description: r.links.map((l: any) => l.anchor).join(", ") });
+      setLinkApplied({ applied: r.applied, links: r.links, skipped: r.skipped, reconciled_stale_markers: r.reconciled_stale_markers });
+      const desc = r.applied > 0
+        ? r.links.map((l: any) => l.anchor).join(", ")
+        : `${r.skipped?.length ?? 0} skipped${r.reconciled_stale_markers ? ` · ${r.reconciled_stale_markers} stale marker(s) cleaned — retry now` : ""}`;
+      toast({ title: `Inserted ${r.applied} link(s)`, description: desc });
     } catch (e: any) { toast({ title: "Apply failed", description: e.message, variant: "destructive" }); }
     setLinkBusy(false);
   };
@@ -1261,11 +1264,30 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
                 <p className="text-xs text-muted-foreground">No high-confidence link opportunities — content already well-linked or no topical matches.</p>
               )}
               {linkApplied && (
-                <div className="text-xs p-2 rounded-md bg-emerald-500/10 border">
-                  <div className="font-medium text-emerald-500">Inserted {linkApplied.applied} link(s)</div>
+                <div className="text-xs p-2 rounded-md bg-emerald-500/10 border space-y-1">
+                  <div className={`font-medium ${linkApplied.applied > 0 ? "text-emerald-500" : "text-amber-500"}`}>
+                    Inserted {linkApplied.applied} link(s){linkApplied.skipped?.length ? ` · ${linkApplied.skipped.length} skipped` : ""}
+                  </div>
+                  {linkApplied.reconciled_stale_markers ? (
+                    <div className="text-amber-500">
+                      Cleaned {linkApplied.reconciled_stale_markers} stale marker(s) from prior overhaul. Click "Apply" again to insert.
+                    </div>
+                  ) : null}
                   {linkApplied.links.map((l, i) => (
-                    <div key={i} className="text-muted-foreground">→ {l.anchor}</div>
+                    <div key={`a-${i}`} className="text-muted-foreground">→ {l.anchor}</div>
                   ))}
+                  {linkApplied.skipped?.length ? (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-muted-foreground">Why {linkApplied.skipped.length} skipped</summary>
+                      <div className="mt-1 space-y-0.5">
+                        {linkApplied.skipped.map((s, i) => (
+                          <div key={`s-${i}`} className="text-muted-foreground">
+                            <Badge variant="outline" className="mr-1">{s.reason}</Badge>{s.anchor}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
                 </div>
               )}
             </CardContent>
