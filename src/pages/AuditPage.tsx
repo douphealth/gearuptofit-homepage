@@ -69,6 +69,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [scanning, setScanning] = useState(false);
   const [filter, setFilter] = useState("");
   const [sevFilter, setSevFilter] = useState<"all" | "critical" | "high">("all");
+  const [sortBy, setSortBy] = useState<"worst-overall" | "worst-cwv" | "worst-lcp" | "worst-cls" | "worst-inp">("worst-overall");
   const [selected, setSelected] = useState<Post | null>(null);
   const [progress, setProgress] = useState<string>("");
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
