@@ -644,7 +644,7 @@ async function generatePremiumContent(post: any, existingRaw: string, providedFi
   const title = stripTags(post?.title?.raw || post?.title?.rendered || "");
   const excerpt = stripTags(post?.excerpt?.raw || post?.excerpt?.rendered || "");
   const link = String(post?.link || "");
-  const sourceText = stripTags(existingRaw).slice(0, 8000);
+  const sourceText = stripTags(existingRaw).slice(0, 4500);
 
   // Strict body requirements — anything less = "empty looking" post.
   const MIN_BODY_WORDS = 1500;
