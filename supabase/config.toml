@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.wp-push-draft]
 verify_jwt = false
+
+[functions.wp-overhaul]
+verify_jwt = false
