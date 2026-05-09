@@ -317,8 +317,48 @@ Deno.serve(async (req) => {
     return jsonRes({ mode, page, totalPages, count: affected.length, affected, done, perPage: PER_PAGE });
   }
 
+  // ── DRY-RUN ─────────────────────────────────────────────────────────────
+  // Returns what `fix` *would* change for one post, without writing anything.
+  // Includes diff summary (chars/lines) + orphan-CSS wrapper count.
+  if (mode === "dry_run") {
+    const ids = Array.isArray(body.post_ids) ? body.post_ids.map(Number).filter(Boolean) : [];
+    if (!ids.length) return jsonRes({ error: "post_ids required" }, 400);
+    const id = ids[0];
+    const user = Deno.env.get("WP_USERNAME");
+    const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
+    if (!user || !pass) return jsonRes({ error: "WP credentials not configured" }, 500);
+    const auth = "Basic " + btoa(`${user}:${pass}`);
+    try {
+      const getRes = await fetch(`${WP_BASE}/posts/${id}?context=edit&_fields=id,title,content,status`, {
+        headers: { Authorization: auth, "User-Agent": "GearupAudit/2.0" },
+      });
+      if (!getRes.ok) {
+        const t = await getRes.text();
+        return jsonRes({ mode, results: [{ post_id: id, ok: false, error: `GET ${getRes.status}: ${t.slice(0,120)}`, http_status: getRes.status }] });
+      }
+      const post: Post & { status?: string } = await getRes.json();
+      const raw = post.content?.raw || "";
+      if (!raw) return jsonRes({ mode, results: [{ post_id: id, ok: false, error: "No editable raw content" }] });
+      const { html: cleaned, removed } = rewrapOrphanCss(raw);
+      const summary = diffSummary(raw, cleaned);
+      return jsonRes({
+        mode,
+        results: [{
+          post_id: id, ok: true,
+          would_change: cleaned !== raw,
+          removed_chars: removed,
+          status: (post as any).status,
+          diff: summary,
+        }],
+      });
+    } catch (e) {
+      return jsonRes({ mode, results: [{ post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) }] });
+    }
+  }
+
   // ── FIX ─────────────────────────────────────────────────────────────────
-  // Surgically re-wraps orphan CSS in 1 post per call.
+  // Surgically re-wraps orphan CSS in 1 post per call. Saves a backup of the
+  // prior content BEFORE writing so the client can `mode: "rollback"` on fail.
   if (mode === "fix") {
     const user = Deno.env.get("WP_USERNAME");
     const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
@@ -326,21 +366,23 @@ Deno.serve(async (req) => {
 
     const ids = Array.isArray(body.post_ids) ? body.post_ids.map(Number).filter(Boolean) : [];
     if (!ids.length) return jsonRes({ error: "post_ids required" }, 400);
-    const id = ids[0]; // 1 per call to stay under worker memory.
+    const id = ids[0];
+    const runId = body.run_id ? String(body.run_id) : undefined;
+    const dryRun = body.dry_run === true || body.dry_run === "true";
 
     const auth = "Basic " + btoa(`${user}:${pass}`);
     try {
-      const getRes = await fetch(`${WP_BASE}/posts/${id}?context=edit&_fields=id,title,content`, {
+      const getRes = await fetch(`${WP_BASE}/posts/${id}?context=edit&_fields=id,title,content,status,date_gmt`, {
         headers: { Authorization: auth, "User-Agent": "GearupAudit/2.0" },
       });
       if (!getRes.ok) {
         const t = await getRes.text();
         return jsonRes({
           mode, attempted: 1, fixed: 0,
-          results: [{ post_id: id, ok: false, error: `GET ${getRes.status}: ${t.slice(0, 120)}` }],
+          results: [{ post_id: id, ok: false, error: `GET ${getRes.status}: ${t.slice(0, 120)}`, http_status: getRes.status }],
         });
       }
-      const post: Post = await getRes.json();
+      const post: Post & { status?: string; date_gmt?: string } = await getRes.json();
       const raw = post.content?.raw || "";
       if (!raw) {
         return jsonRes({
@@ -351,14 +393,29 @@ Deno.serve(async (req) => {
       const { html: cleaned, removed } = rewrapOrphanCss(raw);
       const wantsPublish = body.publish === true || body.publish === "true";
       const contentChanged = cleaned !== raw;
+      const summary = diffSummary(raw, cleaned);
+
+      if (dryRun) {
+        return jsonRes({
+          mode, attempted: 1, fixed: 0,
+          results: [{
+            post_id: id, ok: true, dry_run: true,
+            would_change: contentChanged, would_publish: wantsPublish,
+            removed_chars: removed, diff: summary,
+          }],
+        });
+      }
+
       if (!contentChanged && !wantsPublish) {
         return jsonRes({
           mode, attempted: 1, fixed: 1,
-          results: [{ post_id: id, ok: true, removed_chars: 0, published: false }],
+          results: [{ post_id: id, ok: true, removed_chars: 0, published: false, http_status: 200, completed_at: new Date().toISOString() }],
         });
       }
-      // Build update payload. When publish=true, also bump status and modified
-      // date so WP fires the post_updated hook (purges page caches & CDN).
+
+      // Save backup BEFORE we write so rollback is always possible.
+      await saveBackup(id, raw, post.status, post.date_gmt, runId);
+
       const payload: Record<string, unknown> = {};
       if (contentChanged) payload.content = cleaned;
       if (wantsPublish) {
@@ -373,18 +430,23 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify(payload),
       });
+      const completedAt = new Date().toISOString();
       if (!updateRes.ok) {
         const t = await updateRes.text();
         return jsonRes({
           mode, attempted: 1, fixed: 0,
-          results: [{ post_id: id, ok: false, error: `Update ${updateRes.status}: ${t.slice(0, 160)}` }],
+          results: [{ post_id: id, ok: false, error: `Update ${updateRes.status}: ${t.slice(0, 160)}`, http_status: updateRes.status, completed_at: completedAt }],
         });
       }
       await updateRes.text();
       await logEvent(id, `Re-wrapped orphan CSS (${removed} chars wrappers removed)${wantsPublish ? " · republished" : ""}`);
       return jsonRes({
         mode, attempted: 1, fixed: 1,
-        results: [{ post_id: id, ok: true, removed_chars: removed, published: wantsPublish }],
+        results: [{
+          post_id: id, ok: true, removed_chars: removed,
+          published: wantsPublish, http_status: updateRes.status,
+          completed_at: completedAt, diff: summary,
+        }],
       });
     } catch (e) {
       return jsonRes({
@@ -395,8 +457,6 @@ Deno.serve(async (req) => {
   }
 
   // ── PUBLISH ─────────────────────────────────────────────────────────────
-  // Force-republish a post (status=publish + bumped modified date) so WP fires
-  // its update hooks and CDN/page caches purge. 1 post per call.
   if (mode === "publish") {
     const user = Deno.env.get("WP_USERNAME");
     const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
@@ -404,8 +464,16 @@ Deno.serve(async (req) => {
     const ids = Array.isArray(body.post_ids) ? body.post_ids.map(Number).filter(Boolean) : [];
     if (!ids.length) return jsonRes({ error: "post_ids required" }, 400);
     const id = ids[0];
+    const runId = body.run_id ? String(body.run_id) : undefined;
     const auth = "Basic " + btoa(`${user}:${pass}`);
     try {
+      const cur = await fetch(`${WP_BASE}/posts/${id}?context=edit&_fields=id,content,status,date_gmt`, {
+        headers: { Authorization: auth, "User-Agent": "GearupAudit/2.0" },
+      });
+      if (cur.ok) {
+        const p: any = await cur.json();
+        await saveBackup(id, p.content?.raw || "", p.status, p.date_gmt, runId);
+      }
       const up = await fetch(`${WP_BASE}/posts/${id}`, {
         method: "POST",
         headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/2.0" },
@@ -414,16 +482,84 @@ Deno.serve(async (req) => {
           date_gmt: new Date().toISOString().replace(/\.\d+Z$/, ""),
         }),
       });
+      const completedAt = new Date().toISOString();
       if (!up.ok) {
         const t = await up.text();
-        return jsonRes({ mode, results: [{ post_id: id, ok: false, error: `Publish ${up.status}: ${t.slice(0,160)}` }] });
+        return jsonRes({ mode, results: [{ post_id: id, ok: false, error: `Publish ${up.status}: ${t.slice(0,160)}`, http_status: up.status, completed_at: completedAt }] });
       }
       await up.text();
       await logEvent(id, "Force republished");
-      return jsonRes({ mode, results: [{ post_id: id, ok: true, published: true }] });
+      return jsonRes({ mode, results: [{ post_id: id, ok: true, published: true, http_status: up.status, completed_at: completedAt }] });
     } catch (e) {
       return jsonRes({ mode, results: [{ post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) }] });
     }
+  }
+
+  // ── ROLLBACK ────────────────────────────────────────────────────────────
+  if (mode === "rollback") {
+    const user = Deno.env.get("WP_USERNAME");
+    const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
+    if (!user || !pass) return jsonRes({ error: "WP credentials not configured" }, 500);
+    const ids = Array.isArray(body.post_ids) ? body.post_ids.map(Number).filter(Boolean) : [];
+    if (!ids.length) return jsonRes({ error: "post_ids required" }, 400);
+    const id = ids[0];
+    const auth = "Basic " + btoa(`${user}:${pass}`);
+    const backup = await loadLatestBackup(id);
+    if (!backup) return jsonRes({ mode, results: [{ post_id: id, ok: false, error: "No backup found for this post" }] });
+    try {
+      const payload: Record<string, unknown> = { content: backup.content };
+      if (backup.status) payload.status = backup.status;
+      if (backup.date_gmt) payload.date_gmt = backup.date_gmt;
+      const up = await fetch(`${WP_BASE}/posts/${id}`, {
+        method: "POST",
+        headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/2.0" },
+        body: JSON.stringify(payload),
+      });
+      const completedAt = new Date().toISOString();
+      if (!up.ok) {
+        const t = await up.text();
+        return jsonRes({ mode, results: [{ post_id: id, ok: false, error: `Rollback ${up.status}: ${t.slice(0,160)}`, http_status: up.status, completed_at: completedAt }] });
+      }
+      await up.text();
+      await logEvent(id, "Rolled back to previous content");
+      return jsonRes({ mode, results: [{ post_id: id, ok: true, rolled_back: true, http_status: up.status, completed_at: completedAt }] });
+    } catch (e) {
+      return jsonRes({ mode, results: [{ post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) }] });
+    }
+  }
+
+  // ── CHECKPOINTS ─────────────────────────────────────────────────────────
+  if (mode === "checkpoint_load") {
+    const key = String(body.key || "default");
+    const r = await dbFetch(`wp_cleanup_checkpoints?key=eq.${encodeURIComponent(key)}&limit=1`, { method: "GET" });
+    if (!r) return jsonRes({ mode, checkpoint: null });
+    const arr = await r.json();
+    return jsonRes({ mode, checkpoint: arr[0] || null });
+  }
+  if (mode === "checkpoint_save") {
+    const key = String(body.key || "default");
+    const payload = {
+      key,
+      phase: body.phase || "scan",
+      page: Number(body.page) || 1,
+      per_page: Number(body.per_page) || 50,
+      total_pages: body.total_pages ? Number(body.total_pages) : null,
+      processed_ids: Array.isArray(body.processed_ids) ? body.processed_ids.map(Number) : [],
+      affected: body.affected || [],
+      results: body.results || [],
+      updated_at: new Date().toISOString(),
+    };
+    await dbFetch(`wp_cleanup_checkpoints?on_conflict=key`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(payload),
+    });
+    return jsonRes({ mode, ok: true });
+  }
+  if (mode === "checkpoint_clear") {
+    const key = String(body.key || "default");
+    await dbFetch(`wp_cleanup_checkpoints?key=eq.${encodeURIComponent(key)}`, { method: "DELETE" });
+    return jsonRes({ mode, ok: true });
   }
 
   // Targeted scan for a single URL/slug.
