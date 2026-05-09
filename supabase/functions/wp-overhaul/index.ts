@@ -381,15 +381,46 @@ Return the JSON now. Remember: sectionsHtml must be the full ${MIN_BODY_WORDS}+ 
   return { ...lastAi, ...(providedFixes || {}) };
 }
 
-function injectSections(html: string, sectionsHtml: string): { html: string; added: boolean } {
-  if (!sectionsHtml || html.includes("<!--gutf:sections-->")) return { html, added: false };
-  // Insert after intro marker if present, else after responsive CSS, else prepend
+// WordPress KSES strips <section>, <article>, <header>, <footer>, <aside> for users
+// without `unfiltered_html` capability (Application Passwords NEVER have it).
+// Convert every semantic block element to a div with the same class so the body
+// actually survives the REST update.
+function ksesSafe(html: string): string {
+  if (!html) return html;
+  return String(html)
+    .replace(/<section\b/gi, '<div data-gutf-section="1"')
+    .replace(/<\/section>/gi, "</div>")
+    .replace(/<article\b/gi, '<div data-gutf-article="1"')
+    .replace(/<\/article>/gi, "</div>");
+}
+
+function extractBetween(html: string, openMarker: string, closeMarker: string): { before: string; inner: string; after: string; found: boolean } {
+  const a = html.indexOf(openMarker);
+  if (a < 0) return { before: html, inner: "", after: "", found: false };
+  const b = html.indexOf(closeMarker, a + openMarker.length);
+  if (b < 0) return { before: html, inner: "", after: "", found: false };
+  return { before: html.slice(0, a), inner: html.slice(a + openMarker.length, b), after: html.slice(b + closeMarker.length), found: true };
+}
+
+function injectOrReplaceSections(html: string, sectionsHtml: string): { html: string; added: boolean; replaced: boolean } {
+  if (!sectionsHtml) return { html, added: false, replaced: false };
+  const safe = ksesSafe(sectionsHtml);
+  const block = `\n<!--gutf:sections-->${safe}<!--/gutf:sections-->\n`;
+  const ex = extractBetween(html, "<!--gutf:sections-->", "<!--/gutf:sections-->");
+  if (ex.found) {
+    const innerWords = htmlWordCount(ex.inner);
+    const innerH2 = countTag(ex.inner, "h2");
+    // If existing body was wiped by KSES (or otherwise too thin), replace it.
+    if (innerWords < 600 || innerH2 < 3) {
+      return { html: `${ex.before}${block}${ex.after}`, added: false, replaced: true };
+    }
+    return { html, added: false, replaced: false };
+  }
   const introClose = "<!--/gutf:intro-->";
-  const block = `\n<!--gutf:sections-->${sectionsHtml}<!--/gutf:sections-->\n`;
-  if (html.includes(introClose)) return { html: html.replace(introClose, introClose + block), added: true };
+  if (html.includes(introClose)) return { html: html.replace(introClose, introClose + block), added: true, replaced: false };
   const cssIdx = html.indexOf("</style>");
-  if (cssIdx >= 0) return { html: html.slice(0, cssIdx + 8) + block + html.slice(cssIdx + 8), added: true };
-  return { html: block + html, added: true };
+  if (cssIdx >= 0) return { html: html.slice(0, cssIdx + 8) + block + html.slice(cssIdx + 8), added: true, replaced: false };
+  return { html: block + html, added: true, replaced: false };
 }
 
 function visualValidate(liveHtml: string): { score: number; checks: Record<string, boolean | number>; issues: string[] } {
