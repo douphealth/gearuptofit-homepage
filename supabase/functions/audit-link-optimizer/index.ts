@@ -387,7 +387,7 @@ Deno.serve(async (req) => {
         suggestions = r.suggestions;
       }
       const max = Math.max(1, Math.min(12, Number(body.max) || 6));
-      const out = await applyToLivePost(postId, suggestions.slice(0, max));
+      const out = await applyToLivePost(supabase, postId, suggestions.slice(0, max));
       // Log
       await fetch(`${Deno.env.get("SUPABASE_URL")}/rest/v1/push_log`, {
         method: "POST",
