@@ -375,24 +375,48 @@ function BulkCleanupPanel() {
   const [targetBusy, setTargetBusy] = useState(false);
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [verifyResult, setVerifyResult] = useState<Verdict | null>(null);
+  const [autoPublish, setAutoPublish] = useState(true);
+
+  // Adaptive scan: starts at 50/page, halves to 10 on WORKER_RESOURCE_LIMIT,
+  // ramps back +10 every successful page up to 100. Keeps throughput high
+  // without breaking on the rare giant-content post that blew the 150MB cap.
+  const isResourceLimit = (msg: string) =>
+    /WORKER_RESOURCE_LIMIT|546|compute resources|memory/i.test(msg || "");
 
   const scan = async () => {
     setScanning(true); setResults(null); setItems([]);
+    const MIN = 10, MAX = 100, RAMP = 10;
+    let perPage = 50;
     try {
       const all: LeakItem[] = [];
       let page = 1;
       let totalPages = 1;
-      while (page <= 100) {
-        const r = await callAudit<{ count: number; affected: LeakItem[]; done: boolean; totalPages: number; page: number }>(
-          "wp-bulk-cleanup",
-          { mode: "scan", page },
-        );
-        totalPages = r.totalPages || totalPages;
-        all.push(...r.affected);
-        setItems([...all]);
-        setStatus(`Scanned page ${page}/${totalPages} · ${all.length} affected`);
-        if (r.done) break;
-        page++;
+      while (page <= 400) {
+        let attempt = 0;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          try {
+            const r = await callAudit<{ count: number; affected: LeakItem[]; done: boolean; totalPages: number; page: number; perPage: number }>(
+              "wp-bulk-cleanup",
+              { mode: "scan", page, perPage },
+            );
+            totalPages = r.totalPages || totalPages;
+            all.push(...r.affected);
+            setItems([...all]);
+            setStatus(`Scanned page ${page}/${totalPages} · ${all.length} affected · ${perPage}/page`);
+            if (perPage < MAX) perPage = Math.min(MAX, perPage + RAMP);
+            if (r.done) { page = totalPages + 1; break; }
+            page++; break;
+          } catch (e: any) {
+            if (isResourceLimit(e?.message) && perPage > MIN && attempt < 4) {
+              perPage = Math.max(MIN, Math.floor(perPage / 2));
+              attempt++;
+              setStatus(`Resource limit · retrying page ${page} at ${perPage}/page`);
+              continue;
+            }
+            throw e;
+          }
+        }
       }
       toast({ title: `Scan complete`, description: `${all.length} posts contain leaked CSS.` });
     } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
@@ -401,22 +425,42 @@ function BulkCleanupPanel() {
 
   const fixAll = async () => {
     if (!items || items.length === 0) return;
-    if (!confirm(`Re-wrap orphan CSS in ${items.length} post(s)? The orphan CSS that currently shows as visible text at the top of these posts will be moved back inside a single <style> tag. Live posts are updated in place.`)) return;
+    const willPublish = autoPublish;
+    if (!confirm(`Re-wrap orphan CSS in ${items.length} post(s)?${willPublish ? " Each post will also be republished to flush CDN caches." : ""} The orphan CSS that currently shows as visible text at the top of these posts will be moved back inside a single <style> tag. Live posts are updated in place.`)) return;
     setFixing(true);
     try {
       const ids = items.map((i) => i.post_id);
       const all: FixResult[] = [];
       for (let i = 0; i < ids.length; i += 1) {
-        setStatus(`Fixing ${i + 1}/${ids.length} · post ${ids[i]}`);
-        const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]] });
+        setStatus(`Fixing ${i + 1}/${ids.length} · post ${ids[i]}${willPublish ? " (+publish)" : ""}`);
+        const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]], publish: willPublish });
         all.push(...r.results);
         setResults([...all]);
       }
       setResults(all);
       const ok = all.filter((r) => r.ok).length;
       const failed = all.filter((r) => !r.ok).length;
-      toast({ title: `Cleanup done`, description: `${ok} fixed, ${failed} failed.` });
+      toast({ title: `Cleanup done`, description: `${ok} fixed, ${failed} failed${willPublish ? `, republished` : ""}.` });
     } catch (e: any) { toast({ title: "Cleanup failed", description: e.message, variant: "destructive" }); }
+    setStatus(""); setFixing(false);
+  };
+
+  const publishAll = async () => {
+    if (!items || items.length === 0) return;
+    if (!confirm(`Force-republish ${items.length} post(s)? This bumps the modified date and re-fires WordPress publish hooks (purges page/CDN caches). Content is NOT changed.`)) return;
+    setFixing(true);
+    try {
+      const ids = items.map((i) => i.post_id);
+      const all: FixResult[] = [];
+      for (let i = 0; i < ids.length; i += 1) {
+        setStatus(`Republishing ${i + 1}/${ids.length} · post ${ids[i]}`);
+        const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "publish", post_ids: [ids[i]] });
+        all.push(...r.results);
+        setResults([...all]);
+      }
+      const ok = all.filter((r) => r.ok).length;
+      toast({ title: `Republish done`, description: `${ok}/${ids.length} republished.` });
+    } catch (e: any) { toast({ title: "Republish failed", description: e.message, variant: "destructive" }); }
     setStatus(""); setFixing(false);
   };
 
