@@ -537,7 +537,19 @@ Deno.serve(async (req) => {
   // Re-run visual transforms over AI-injected blocks (lazy imgs, table wrap, iframe wrap)
   const visual2 = applyVisualFixes(html); html = visual2.html; changes.push(...visual2.changes.map((c) => `post:${c}`));
 
-  if (dryRun) return jsonRes({ ok: true, dry_run: true, changes, preview: html.slice(0, 4000) });
+  // Pre-publish gate: refuse to write a post that will look empty.
+  const bodyWords = htmlWordCount(html);
+  const bodyH2 = countTag(html, "h2");
+  if (bodyWords < 600 || bodyH2 < 3) {
+    await logEvent(postId, `Refusing to publish empty-looking content: words=${bodyWords} h2=${bodyH2}`, false);
+    return jsonRes({
+      ok: false, post_id: postId, changes,
+      message: `Refused to publish: AI body content insufficient (words=${bodyWords}, h2 sections=${bodyH2}). Required: ≥600 words and ≥3 H2 sections. The AI Gateway likely returned a truncated response — retry the overhaul.`,
+      content_source: contentSource, body_word_count: bodyWords, body_h2_count: bodyH2,
+    }, 200);
+  }
+
+  if (dryRun) return jsonRes({ ok: true, dry_run: true, changes, preview: html.slice(0, 4000), body_word_count: bodyWords, body_h2_count: bodyH2 });
 
   if (html === raw && (!fixes.metaTitle || fixes.metaTitle === post.title?.raw) && (!fixes.metaDescription || fixes.metaDescription === post.excerpt?.raw)) {
     await logEvent(postId, "No-op (already overhauled)", true);
@@ -573,11 +585,15 @@ Deno.serve(async (req) => {
   const verifyContent = String(verifyBody?.content?.raw || verifyBody?.content?.rendered || "");
   const restHasSignals = containsAppliedSignal(verifyContent);
   const restHasRunMarker = containsRunMarker(verifyContent, runId);
+  const restBodyWords = htmlWordCount(verifyContent);
+  const restBodyH2 = countTag(verifyContent, "h2");
   const savedPublished = String(verifyBody?.status || updatedPost?.status || "") === "publish";
   let liveHasContentSlot: boolean | null = null;
   let liveHasSignals = false;
   let liveHasRunMarker = false;
   let liveStatus: number | null = null;
+  let liveBodyWords = 0;
+  let liveBodyH2 = 0;
   let liveUrl = canonicalPublicUrl(String(updatedPost?.link || post?.link || ""));
   let visualReport: { score: number; checks: Record<string, boolean | number>; issues: string[] } | null = null;
   if (liveUrl) {
@@ -596,21 +612,28 @@ Deno.serve(async (req) => {
             const tag = (liveHtml.slice(idx).match(/<(article|main)\b/i) || ["", "article"])[1].toLowerCase();
             return findBalancedElement(liveHtml, tag, idx) || liveHtml;
           })();
+          const articleClean = stripNonContent(articleZone);
+          liveBodyWords = htmlWordCount(articleClean);
+          liveBodyH2 = countTag(articleClean, "h2");
           visualReport = visualValidate(articleZone);
-          if (liveHasRunMarker) break;
+          if (liveHasRunMarker && liveBodyWords >= 600 && liveBodyH2 >= 3) break;
         }
       } catch { /* retry below */ }
       await sleep(900 * attempt);
     }
   }
 
-  const verification = { rest_has_signals: restHasSignals, rest_has_run_marker: restHasRunMarker, saved_status_publish: savedPublished, live_url: liveUrl, live_status: liveStatus, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals, live_has_run_marker: liveHasRunMarker, run_marker: marker };
-  if (!savedPublished || !restHasSignals || !restHasRunMarker || !liveHasRunMarker) {
-    await logEvent(postId, `Overhaul not live-verified; saved=${savedPublished} rest_marker=${restHasRunMarker} live_marker=${liveHasRunMarker} (${changes.join(", ")})`, false);
-    return jsonRes({ ok: false, post_id: postId, changes, message: liveHasRunMarker ? "WordPress saved the overhaul, but publish status verification failed." : "WordPress accepted the update, but the public live post did not show this exact publish run after cache-busted re-fetch. Treating as NOT published/visible.", content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } }, 200);
+  const liveBodyOk = liveBodyWords >= 600 && liveBodyH2 >= 3;
+  const verification = { rest_has_signals: restHasSignals, rest_has_run_marker: restHasRunMarker, rest_body_word_count: restBodyWords, rest_body_h2_count: restBodyH2, saved_status_publish: savedPublished, live_url: liveUrl, live_status: liveStatus, live_has_content_slot: liveHasContentSlot, live_has_signals: liveHasSignals, live_has_run_marker: liveHasRunMarker, live_body_word_count: liveBodyWords, live_body_h2_count: liveBodyH2, live_body_ok: liveBodyOk, run_marker: marker };
+  if (!savedPublished || !restHasSignals || !restHasRunMarker || !liveHasRunMarker || !liveBodyOk) {
+    const reason = !liveBodyOk && liveHasRunMarker
+      ? `Live page renders the run marker but the visible article body is too thin (words=${liveBodyWords}, h2=${liveBodyH2}). Reader will see a near-empty post. Likely cause: WordPress KSES stripped <section> tags, an Elementor/page-builder template overrides post_content, or CDN cache is serving an older render.`
+      : (liveHasRunMarker ? "WordPress saved the overhaul, but publish status verification failed." : "WordPress accepted the update, but the public live post did not show this exact publish run after cache-busted re-fetch. Treating as NOT published/visible.");
+    await logEvent(postId, `Overhaul not live-verified; saved=${savedPublished} rest_marker=${restHasRunMarker} live_marker=${liveHasRunMarker} body_ok=${liveBodyOk} live_words=${liveBodyWords} live_h2=${liveBodyH2} (${changes.join(", ")})`, false);
+    return jsonRes({ ok: false, post_id: postId, changes, message: reason, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } }, 200);
   }
 
   const visualScore = visualReport?.score ?? null;
-  await logEvent(postId, `Overhauled and public-live verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"}; ${marker})`, true);
-  return jsonRes({ ok: true, post_id: postId, changes, message: `Applied, published, and verified on public live URL (visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}`, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
+  await logEvent(postId, `Overhauled and public-live verified: ${changes.join(", ")} (source=${contentSource}; visual=${visualScore ?? "n/a"}; body=${liveBodyWords}w/${liveBodyH2}h2; ${marker})`, true);
+  return jsonRes({ ok: true, post_id: postId, changes, message: `Applied, published, and verified (${liveBodyWords} words · ${liveBodyH2} H2 sections · visual ${visualScore ?? "n/a"}/100): ${changes.join(", ")}`, content_source: contentSource, wp_status: updateRes.status, verification, visual: visualReport, seo: { primary_keyword: enriched.primaryKeyword, semantic_keywords: enriched.semanticKeywords, entities: enriched.entities, meta_title: finalMetaTitle, meta_description: finalMetaDesc } });
 });
