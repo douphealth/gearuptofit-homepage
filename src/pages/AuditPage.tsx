@@ -1138,11 +1138,14 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
     if (!confirm(`Insert ${linkSugs.length} internal link(s) directly into LIVE post ${post.post_id}? Idempotent — re-running won't duplicate.`)) return;
     setLinkBusy(true);
     try {
-      const r = await callAudit<{ applied: number; links: any[] }>("audit-link-optimizer", {
+      const r = await callAudit<{ applied: number; links: any[]; skipped?: any[]; reconciled_stale_markers?: number }>("audit-link-optimizer", {
         mode: "apply", post_id: post.post_id, suggestions: linkSugs, max: linkSugs.length,
       });
-      setLinkApplied({ applied: r.applied, links: r.links });
-      toast({ title: `Inserted ${r.applied} link(s)`, description: r.links.map((l: any) => l.anchor).join(", ") });
+      setLinkApplied({ applied: r.applied, links: r.links, skipped: r.skipped, reconciled_stale_markers: r.reconciled_stale_markers });
+      const desc = r.applied > 0
+        ? r.links.map((l: any) => l.anchor).join(", ")
+        : `${r.skipped?.length ?? 0} skipped${r.reconciled_stale_markers ? ` · ${r.reconciled_stale_markers} stale marker(s) cleaned — retry now` : ""}`;
+      toast({ title: `Inserted ${r.applied} link(s)`, description: desc });
     } catch (e: any) { toast({ title: "Apply failed", description: e.message, variant: "destructive" }); }
     setLinkBusy(false);
   };
