@@ -1332,6 +1332,11 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
                       <div>
                         Live slot: {String(overhaulResult.verification.live_has_content_slot ?? "unknown")} · Live SEO markers: {overhaulResult.verification.live_has_signals ? "yes" : "no"} · HTTP: {overhaulResult.verification.live_status ?? "unknown"}
                       </div>
+                      {(overhaulResult.verification.live_body_word_count !== undefined) && (
+                        <div className={overhaulResult.verification.live_body_ok ? "" : "text-destructive font-medium"}>
+                          Visible body on live URL: {overhaulResult.verification.live_body_word_count} words · {overhaulResult.verification.live_body_h2_count} H2 sections {overhaulResult.verification.live_body_ok ? "✓" : "✗ (post will look empty to readers)"}
+                        </div>
+                      )}
                     </div>
                   )}
                   {overhaulResult.visual && <div className="mt-1 text-muted-foreground">Visual score: {overhaulResult.visual.score}/100</div>}
