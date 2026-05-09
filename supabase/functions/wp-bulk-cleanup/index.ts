@@ -219,11 +219,12 @@ Deno.serve(async (req) => {
   // ── SCAN ────────────────────────────────────────────────────────────────
   // Scans 1 REST page (up to 100 posts) of public posts per call.
   if (mode === "scan") {
-    // Memory-safe: 25 posts per page (was 100). Each post can carry 50–200KB of
-    // rendered HTML; 100 of those + regex work blew past the 150MB worker cap
-    // (see: WORKER_RESOURCE_LIMIT in edge logs). 25 keeps peak heap well under.
-    const PER_PAGE = 25;
-    const page = Math.max(1, Math.min(200, Number(body.page) || 1));
+    // Adaptive page size. Client passes `perPage`; server clamps to [10, 100].
+    // On WORKER_RESOURCE_LIMIT the client halves and retries; on success it
+    // ramps back up. Default 50 = 2x faster than the old 25 baseline while
+    // still staying well under the 150MB worker cap on typical posts.
+    const PER_PAGE = Math.max(10, Math.min(100, Number(body.perPage) || 50));
+    const page = Math.max(1, Math.min(400, Number(body.page) || 1));
     const url = `${WP_BASE}/posts?per_page=${PER_PAGE}&page=${page}&status=publish&_fields=id,slug,link,title,content`;
     const res = await fetch(url, { headers: { "User-Agent": "GearupAudit/2.0", Accept: "application/json" } });
     if (res.status === 400 && page > 1) {
