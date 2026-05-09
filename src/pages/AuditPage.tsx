@@ -240,13 +240,26 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       <BulkCleanupPanel />
 
 
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div className="flex flex-wrap gap-2 mb-4 items-center">
         <Input placeholder="Filter by title…" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
         {(["all", "critical", "high"] as const).map((s) => (
           <Button key={s} size="sm" variant={sevFilter === s ? "default" : "outline"} onClick={() => setSevFilter(s)}>
             {s}
           </Button>
         ))}
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Sort</span>
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}>
+            <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="worst-overall">Worst overall score</SelectItem>
+              <SelectItem value="worst-cwv">Worst Core Web Vitals</SelectItem>
+              <SelectItem value="worst-lcp">Worst LCP</SelectItem>
+              <SelectItem value="worst-cls">Worst CLS</SelectItem>
+              <SelectItem value="worst-inp">Worst INP</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <Card>
@@ -255,6 +268,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             <thead className="bg-muted/40 text-left">
               <tr>
                 <th className="p-3">Score</th>
+                <th className="p-3 hidden sm:table-cell">CWV</th>
                 <th className="p-3">Title</th>
                 <th className="p-3 hidden md:table-cell">Issues</th>
                 <th className="p-3 hidden lg:table-cell">Updated</th>
@@ -262,9 +276,20 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
               </tr>
             </thead>
             <tbody>
-              {ranked.map(({ post, score }) => (
+              {ranked.map(({ post, score }) => {
+                const c: any = (score?.metrics as any)?.cwv;
+                return (
                 <tr key={post.post_id} className="border-t hover:bg-muted/20">
                   <td className={`p-3 font-bold ${scoreColor(score?.score ?? 0)}`}>{score?.score ?? "—"}</td>
+                  <td className="p-3 hidden sm:table-cell text-xs">
+                    {c ? (
+                      <div className="flex gap-1">
+                        <span className={scoreColor(c.lcpScore ?? 0)}>L{c.lcpScore ?? "—"}</span>
+                        <span className={scoreColor(c.clsScore ?? 0)}>C{c.clsScore ?? "—"}</span>
+                        <span className={scoreColor(c.inpScore ?? 0)}>I{c.inpScore ?? "—"}</span>
+                      </div>
+                    ) : <span className="text-muted-foreground">—</span>}
+                  </td>
                   <td className="p-3" dangerouslySetInnerHTML={{ __html: post.title }} />
                   <td className="p-3 hidden md:table-cell">
                     <div className="flex gap-1 flex-wrap">
@@ -281,7 +306,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                     <Button size="sm" variant="outline" onClick={() => setSelected(post)}>Open</Button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {!ranked.length && !loading && (
                 <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No posts. Click "Refresh WP" then "Re-score all".</td></tr>
               )}
