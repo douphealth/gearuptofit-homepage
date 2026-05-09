@@ -552,17 +552,30 @@ Deno.serve(async (req) => {
 
 
   // 1b. Premium AI generation (SOTA, semantic, outranking content) — merged with caller fixes.
-  const enriched = premiumQuality ? await generatePremiumContent(post, raw, fixes) : (fixes || {});
+  const enrichedRaw = premiumQuality ? await generatePremiumContent(post, raw, fixes) : (fixes || {});
+  // KSES sanitization: strip <section>/<article> from any AI/caller HTML so the body
+  // actually survives the WordPress REST update (Application Passwords lack unfiltered_html).
+  const enriched: Record<string, any> = {
+    ...enrichedRaw,
+    introHtml: ksesSafe(enrichedRaw.introHtml || ""),
+    sectionsHtml: ksesSafe(enrichedRaw.sectionsHtml || ""),
+    faqHtml: ksesSafe(enrichedRaw.faqHtml || ""),
+    conclusionHtml: ksesSafe(enrichedRaw.conclusionHtml || ""),
+  };
 
-  // 2. Visual transforms
-  const visual = applyVisualFixes(raw);
+  // 2. Visual transforms — also strip leftover <section>/<article> from existing raw,
+  // so an old post that had its body stripped by KSES gets fully rewritten.
+  const visual = applyVisualFixes(ksesSafe(raw));
   let html = visual.html;
   const changes: string[] = [...visual.changes];
 
   // 3. Inject blocks (responsive CSS first so it sits above content)
   const css = ensureResponsiveCss(html); html = css.html; if (css.added) changes.push("responsive-css");
   const intro = injectIntro(html, enriched.introHtml); html = intro.html; if (intro.added) changes.push("intro");
-  const sections = injectSections(html, enriched.sectionsHtml); html = sections.html; if (sections.added) changes.push("premium-sections");
+  const sections = injectOrReplaceSections(html, enriched.sectionsHtml);
+  html = sections.html;
+  if (sections.added) changes.push("premium-sections");
+  if (sections.replaced) changes.push("premium-sections-replaced");
   const concl = injectConclusion(html, enriched.conclusionHtml); html = concl.html; if (concl.added) changes.push("conclusion");
   const faq = injectFaq(html, enriched.faqHtml); html = faq.html; if (faq.added) changes.push("faq");
   const ld = injectJsonLd(html, enriched.jsonLd); html = ld.html; if (ld.added) changes.push("jsonld");
@@ -583,9 +596,24 @@ Deno.serve(async (req) => {
 
   if (dryRun) return jsonRes({ ok: true, dry_run: true, changes, preview: html.slice(0, 4000), body_word_count: bodyWords, body_h2_count: bodyH2 });
 
+  // Idempotency: only treat as no-op when the live page ALSO renders a substantial body.
+  // If html === raw but the existing live post has fewer than 600 words / 3 H2s
+  // (e.g. KSES previously stripped the section bodies), we MUST re-publish so the
+  // server re-receives the full content.
   if (html === raw && (!fixes.metaTitle || fixes.metaTitle === post.title?.raw) && (!fixes.metaDescription || fixes.metaDescription === post.excerpt?.raw)) {
-    await logEvent(postId, "No-op (already overhauled)", true);
-    return jsonRes({ ok: true, post_id: postId, changes: ["noop"], message: "Already fully overhauled (idempotent)." });
+    const rawWords = htmlWordCount(raw);
+    const rawH2 = countTag(raw, "h2");
+    if (rawWords >= 600 && rawH2 >= 3) {
+      await logEvent(postId, `No-op (already overhauled, raw body ${rawWords}w/${rawH2}h2)`, true);
+      return jsonRes({ ok: true, post_id: postId, changes: ["noop"], message: `Already fully overhauled (${rawWords} words · ${rawH2} H2 sections).` });
+    }
+    // Force a re-injection by stripping the empty sections marker so the next pass rewrites it.
+    html = html.replace(/<!--gutf:sections-->[\s\S]*?<!--\/gutf:sections-->/g, "");
+    if (enriched.sectionsHtml) {
+      const reinj = injectOrReplaceSections(html, enriched.sectionsHtml);
+      html = reinj.html;
+      changes.push("forced-sections-rewrite");
+    }
   }
 
   // 4. PUT update
