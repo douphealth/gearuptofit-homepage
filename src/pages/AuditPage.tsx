@@ -331,7 +331,20 @@ function Stat({ label, value, className = "" }: { label: string; value: number |
 }
 
 type LeakItem = { post_id: number; link: string; title: string; sample?: string; found?: boolean };
-type FixResult = { post_id: number; ok: boolean; removed_chars?: number; error?: string };
+type DiffSummary = {
+  chars_before: number; chars_after: number; chars_delta: number;
+  lines_added: number; lines_removed: number;
+  wrapper_tags_removed: number;
+  style_tags_before: number; style_tags_after: number; style_tags_added: number;
+};
+type FixResult = {
+  post_id: number; ok: boolean;
+  removed_chars?: number; error?: string;
+  http_status?: number; completed_at?: string;
+  published?: boolean; rolled_back?: boolean;
+  dry_run?: boolean; would_change?: boolean; would_publish?: boolean;
+  diff?: DiffSummary;
+};
 type Verdict = {
   verdict: "clean" | "stale_cache" | "real_leak" | "origin_only";
   liveUrl: string; liveStatus: number; liveBytes: number;
@@ -349,15 +362,26 @@ function downloadFile(name: string, content: string, mime: string) {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
 }
 function toCsv(rows: LeakItem[], results: FixResult[] | null): string {
-  const head = ["post_id", "title", "url", "fix_status", "removed_chars", "fix_error", "sample"];
+  const head = [
+    "post_id", "title", "url",
+    "fix_status", "publish_status", "http_code", "completed_at",
+    "removed_chars", "chars_delta", "wrapper_tags_removed", "style_tags_added",
+    "fix_error", "sample",
+  ];
   const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
   const lines = [head.join(",")];
   for (const it of rows) {
     const r = results?.find((x) => x.post_id === it.post_id);
     lines.push([
       it.post_id, it.title, it.link,
-      r ? (r.ok ? "fixed" : "failed") : "pending",
+      r ? (r.ok ? (r.dry_run ? "would_change" : (r.rolled_back ? "rolled_back" : "fixed")) : "failed") : "pending",
+      r?.published ? "published" : (r?.would_publish ? "would_publish" : ""),
+      r?.http_status ?? "",
+      r?.completed_at ?? "",
       r?.removed_chars ?? "",
+      r?.diff?.chars_delta ?? "",
+      r?.diff?.wrapper_tags_removed ?? "",
+      r?.diff?.style_tags_added ?? "",
       r?.error ?? "",
       it.sample ?? "",
     ].map(esc).join(","));
