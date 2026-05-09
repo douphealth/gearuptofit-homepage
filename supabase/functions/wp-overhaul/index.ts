@@ -666,10 +666,11 @@ async function generatePremiumContent(post: any, existingRaw: string, providedFi
   const title = stripTags(post?.title?.raw || post?.title?.rendered || "");
   const excerpt = stripTags(post?.excerpt?.raw || post?.excerpt?.rendered || "");
   const link = String(post?.link || "");
-  const sourceText = stripTags(existingRaw).slice(0, 4500);
+  const sourceText = stripTags(existingRaw).slice(0, 2500);
 
   // Strict body requirements — anything less = "empty looking" post.
-  const MIN_BODY_WORDS = 1500;
+  // Keep the AI response below the Edge runtime memory ceiling; local fallback fills any gaps.
+  const MIN_BODY_WORDS = 1200;
   const MIN_BODY_H2 = 5;
   const MIN_INTERNAL_LINKS = 6;
 
@@ -751,7 +752,7 @@ Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible word
 
   let lastAi: Record<string, any> = {};
   let lastWc = 0, lastH2 = 0, lastLc = 0;
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= 1; attempt++) {
     try {
       const reinforcement = attempt === 1 ? "" :
         `\n\nPREVIOUS ATTEMPT FAILED VALIDATION: words=${lastWc} (need ${MIN_BODY_WORDS}+), h2=${lastH2} (need ${MIN_BODY_H2}+), internal_links=${lastLc} (need ${MIN_INTERNAL_LINKS}+). FIX ALL THREE.`;
@@ -759,12 +760,12 @@ Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible word
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "google/gemini-2.5-pro",
+          model: "google/gemini-2.5-flash",
           messages: [
             { role: "system", content: sys },
             { role: "user", content: usr + reinforcement },
           ],
-          max_tokens: 12000,
+          max_tokens: 7000,
           response_format: { type: "json_object" },
         }),
       });
