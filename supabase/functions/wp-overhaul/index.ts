@@ -606,6 +606,28 @@ function countTag(html: string, tag: string): number {
   return (String(html || "").match(new RegExp(`<${tag}\\b`, "gi")) || []).length;
 }
 
+function countInternalLinks(html: string): number {
+  return (String(html || "").match(/<a\b[^>]*href=["']https:\/\/gearuptofit\.com\//gi) || []).length;
+}
+
+function ensureMinimumInternalLinks(ai: Record<string, any>, candidates: Array<{ url: string; title: string }>, minLinks: number): Record<string, any> {
+  if (!candidates.length) return ai;
+  const combined = `${ai.sectionsHtml || ""}\n${ai.faqHtml || ""}\n${ai.conclusionHtml || ""}`;
+  const existingCount = countInternalLinks(combined);
+  if (existingCount >= Math.min(minLinks, candidates.length)) return ai;
+
+  const alreadyUsed = new Set((combined.match(/https:\/\/gearuptofit\.com\/[^"'\s<>]+/gi) || []).map((u) => u.replace(/\/$/, "")));
+  const unused = candidates.filter((c) => c.url && c.title && !alreadyUsed.has(c.url.replace(/\/$/, "")));
+  const needed = Math.max(minLinks - existingCount, 1);
+  const selected = (unused.length ? unused : candidates).slice(0, Math.min(6, Math.max(4, needed)));
+  if (!selected.length) return ai;
+
+  const related = `<div class="gutf-related"><h3>Continue reading</h3><ul>${selected
+    .map((c) => `<li><a href="${escapeHtml(c.url)}">${escapeHtml(c.title)}</a></li>`)
+    .join("")}</ul></div>`;
+  return { ...ai, faqHtml: `${String(ai.faqHtml || "").trim()}\n${related}`.trim() };
+}
+
 // Pull a topical short-list of internal-link candidates from the cached WP corpus,
 // scored by token overlap against the source post's title/slug/keyword.
 async function fetchInternalLinkCandidates(post: any, fixes: Record<string, any>, max = 28): Promise<Array<{ url: string; title: string }>> {
@@ -644,10 +666,11 @@ async function generatePremiumContent(post: any, existingRaw: string, providedFi
   const title = stripTags(post?.title?.raw || post?.title?.rendered || "");
   const excerpt = stripTags(post?.excerpt?.raw || post?.excerpt?.rendered || "");
   const link = String(post?.link || "");
-  const sourceText = stripTags(existingRaw).slice(0, 4500);
+  const sourceText = stripTags(existingRaw).slice(0, 2500);
 
   // Strict body requirements — anything less = "empty looking" post.
-  const MIN_BODY_WORDS = 1500;
+  // Keep the AI response below the Edge runtime memory ceiling; local fallback fills any gaps.
+  const MIN_BODY_WORDS = 1200;
   const MIN_BODY_H2 = 5;
   const MIN_INTERNAL_LINKS = 6;
 
@@ -729,7 +752,7 @@ Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible word
 
   let lastAi: Record<string, any> = {};
   let lastWc = 0, lastH2 = 0, lastLc = 0;
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= 1; attempt++) {
     try {
       const reinforcement = attempt === 1 ? "" :
         `\n\nPREVIOUS ATTEMPT FAILED VALIDATION: words=${lastWc} (need ${MIN_BODY_WORDS}+), h2=${lastH2} (need ${MIN_BODY_H2}+), internal_links=${lastLc} (need ${MIN_INTERNAL_LINKS}+). FIX ALL THREE.`;
@@ -737,12 +760,12 @@ Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible word
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "google/gemini-2.5-pro",
+          model: "google/gemini-2.5-flash",
           messages: [
             { role: "system", content: sys },
             { role: "user", content: usr + reinforcement },
           ],
-          max_tokens: 12000,
+          max_tokens: 7000,
           response_format: { type: "json_object" },
         }),
       });
@@ -757,10 +780,10 @@ Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible word
       const txt = String(data?.choices?.[0]?.message?.content || "{}");
       // @ts-ignore release reference
       (data as any).choices = null;
-      const ai = JSON.parse(txt.replace(/^```json\s*|\s*```$/g, ""));
+      const ai = ensureMinimumInternalLinks(JSON.parse(txt.replace(/^```json\s*|\s*```$/g, "")), candidates, MIN_INTERNAL_LINKS);
       const wc = htmlWordCount(ai.sectionsHtml || "");
       const h2c = countTag(ai.sectionsHtml || "", "h2");
-      const lc = ((ai.sectionsHtml || "") + (ai.faqHtml || "")).match(/<a\b[^>]*href=["']https:\/\/gearuptofit\.com/gi)?.length || 0;
+      const lc = countInternalLinks(`${ai.sectionsHtml || ""}\n${ai.faqHtml || ""}`);
       console.log(`AI attempt ${attempt}: words=${wc}, h2=${h2c}, internal_links=${lc}`);
       lastAi = ai;
       lastWc = wc; lastH2 = h2c; lastLc = lc;
@@ -771,7 +794,7 @@ Return the JSON now. Validate before responding: ${MIN_BODY_WORDS}+ visible word
       console.error("AI gen exception", attempt, e);
     }
   }
-  return { ...lastAi, _internalLinkCandidates: candidates, ...(providedFixes || {}) };
+  return { ...ensureMinimumInternalLinks(lastAi, candidates, MIN_INTERNAL_LINKS), _internalLinkCandidates: candidates, ...(providedFixes || {}) };
 }
 
 // WordPress KSES strips <section>, <article>, <header>, <footer>, <aside> for users
