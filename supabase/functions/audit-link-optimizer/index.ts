@@ -179,9 +179,10 @@ function findBestInsertion(
 }
 
 async function loadCorpus(supabase: any, excludeId: number) {
+  // Drop `data` (huge) — we only need title/slug/link/modified_at for scoring.
   const { data } = await supabase
     .from("wp_posts_cache")
-    .select("post_id, title, slug, link, modified_at, data")
+    .select("post_id, title, slug, link, modified_at")
     .neq("post_id", excludeId)
     .limit(1500);
   return data || [];
