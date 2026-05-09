@@ -337,7 +337,38 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ── SCAN_URL ────────────────────────────────────────────────────────────
+  // ── PUBLISH ─────────────────────────────────────────────────────────────
+  // Force-republish a post (status=publish + bumped modified date) so WP fires
+  // its update hooks and CDN/page caches purge. 1 post per call.
+  if (mode === "publish") {
+    const user = Deno.env.get("WP_USERNAME");
+    const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
+    if (!user || !pass) return jsonRes({ error: "WP credentials not configured" }, 500);
+    const ids = Array.isArray(body.post_ids) ? body.post_ids.map(Number).filter(Boolean) : [];
+    if (!ids.length) return jsonRes({ error: "post_ids required" }, 400);
+    const id = ids[0];
+    const auth = "Basic " + btoa(`${user}:${pass}`);
+    try {
+      const up = await fetch(`${WP_BASE}/posts/${id}`, {
+        method: "POST",
+        headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "GearupAudit/2.0" },
+        body: JSON.stringify({
+          status: "publish",
+          date_gmt: new Date().toISOString().replace(/\.\d+Z$/, ""),
+        }),
+      });
+      if (!up.ok) {
+        const t = await up.text();
+        return jsonRes({ mode, results: [{ post_id: id, ok: false, error: `Publish ${up.status}: ${t.slice(0,160)}` }] });
+      }
+      await up.text();
+      await logEvent(id, "Force republished");
+      return jsonRes({ mode, results: [{ post_id: id, ok: true, published: true }] });
+    } catch (e) {
+      return jsonRes({ mode, results: [{ post_id: id, ok: false, error: e instanceof Error ? e.message : String(e) }] });
+    }
+  }
+
   // Targeted scan for a single URL/slug.
   if (mode === "scan_url") {
     const url = String(body.url || "").trim();
