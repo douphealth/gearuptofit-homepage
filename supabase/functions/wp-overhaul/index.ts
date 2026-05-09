@@ -250,7 +250,7 @@ function hasLiveContentSlot(pageHtml: string): boolean {
 }
 
 function containsAppliedSignal(html: string): boolean {
-  return /gutf-faq|gutf-bottom-line|gutf-overhaul-v1|gutf:intro|application\/ld\+json/i.test(html || "");
+  return /gutf-faq|gutf-bottom-line|gutf-overhaul-v[12]|gutf:intro|application\/ld\+json/i.test(html || "");
 }
 
 function canonicalPublicUrl(url: string): string {
