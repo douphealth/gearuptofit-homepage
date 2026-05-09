@@ -400,20 +400,63 @@ function BulkCleanupPanel() {
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [verifyResult, setVerifyResult] = useState<Verdict | null>(null);
   const [autoPublish, setAutoPublish] = useState(true);
+  const [autoRollback, setAutoRollback] = useState(true);
+  const [resumable, setResumable] = useState<{ phase: string; page: number; processed: number; updated_at: string } | null>(null);
+  const [runId] = useState(() => `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 
-  // Adaptive scan: starts at 50/page, halves to 10 on WORKER_RESOURCE_LIMIT,
-  // ramps back +10 every successful page up to 100. Keeps throughput high
-  // without breaking on the rare giant-content post that blew the 150MB cap.
+  const CKPT_KEY = "bulk-cleanup-default";
+
   const isResourceLimit = (msg: string) =>
     /WORKER_RESOURCE_LIMIT|546|compute resources|memory/i.test(msg || "");
 
-  const scan = async () => {
-    setScanning(true); setResults(null); setItems([]);
+  // On mount, look for an interrupted run.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await callAudit<{ checkpoint: any }>("wp-bulk-cleanup", { mode: "checkpoint_load", key: CKPT_KEY });
+        if (r.checkpoint) {
+          setResumable({
+            phase: r.checkpoint.phase,
+            page: r.checkpoint.page,
+            processed: (r.checkpoint.processed_ids || []).length,
+            updated_at: r.checkpoint.updated_at,
+          });
+        }
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
+  const saveCheckpoint = async (payload: Record<string, any>) => {
+    try { await callAudit("wp-bulk-cleanup", { mode: "checkpoint_save", key: CKPT_KEY, ...payload }); } catch { /* best-effort */ }
+  };
+  const clearCheckpoint = async () => {
+    try { await callAudit("wp-bulk-cleanup", { mode: "checkpoint_clear", key: CKPT_KEY }); } catch { /* best-effort */ }
+    setResumable(null);
+  };
+
+  const scan = async (resume = false) => {
+    setScanning(true);
     const MIN = 10, MAX = 100, RAMP = 10;
     let perPage = 50;
+    let startPage = 1;
+    let all: LeakItem[] = [];
+
+    if (resume) {
+      try {
+        const r = await callAudit<{ checkpoint: any }>("wp-bulk-cleanup", { mode: "checkpoint_load", key: CKPT_KEY });
+        if (r.checkpoint) {
+          startPage = Math.max(1, Number(r.checkpoint.page) || 1);
+          perPage = Math.max(MIN, Math.min(MAX, Number(r.checkpoint.per_page) || 50));
+          all = (r.checkpoint.affected as LeakItem[]) || [];
+        }
+      } catch { /* ignore */ }
+    } else {
+      setResults(null); setItems([]);
+    }
+    setItems([...all]);
+
     try {
-      const all: LeakItem[] = [];
-      let page = 1;
+      let page = startPage;
       let totalPages = 1;
       while (page <= 400) {
         let attempt = 0;
@@ -429,6 +472,7 @@ function BulkCleanupPanel() {
             setItems([...all]);
             setStatus(`Scanned page ${page}/${totalPages} · ${all.length} affected · ${perPage}/page`);
             if (perPage < MAX) perPage = Math.min(MAX, perPage + RAMP);
+            await saveCheckpoint({ phase: "scan", page: page + 1, per_page: perPage, total_pages: totalPages, affected: all });
             if (r.done) { page = totalPages + 1; break; }
             page++; break;
           } catch (e: any) {
@@ -442,30 +486,134 @@ function BulkCleanupPanel() {
           }
         }
       }
+      await clearCheckpoint();
       toast({ title: `Scan complete`, description: `${all.length} posts contain leaked CSS.` });
-    } catch (e: any) { toast({ title: "Scan failed", description: e.message, variant: "destructive" }); }
+    } catch (e: any) {
+      toast({ title: "Scan stopped", description: `${e.message}. Checkpoint saved — click Resume to continue.`, variant: "destructive" });
+      setResumable({ phase: "scan", page: startPage, processed: all.length, updated_at: new Date().toISOString() });
+    }
     setStatus(""); setScanning(false);
   };
 
-  const fixAll = async () => {
+  // Dry-run: preview which posts would change without writing.
+  const dryRunAll = async () => {
     if (!items || items.length === 0) return;
-    const willPublish = autoPublish;
-    if (!confirm(`Re-wrap orphan CSS in ${items.length} post(s)?${willPublish ? " Each post will also be republished to flush CDN caches." : ""} The orphan CSS that currently shows as visible text at the top of these posts will be moved back inside a single <style> tag. Live posts are updated in place.`)) return;
     setFixing(true);
     try {
       const ids = items.map((i) => i.post_id);
       const all: FixResult[] = [];
       for (let i = 0; i < ids.length; i += 1) {
-        setStatus(`Fixing ${i + 1}/${ids.length} · post ${ids[i]}${willPublish ? " (+publish)" : ""}`);
-        const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]], publish: willPublish });
-        all.push(...r.results);
+        setStatus(`Dry-run ${i + 1}/${ids.length} · post ${ids[i]}`);
+        try {
+          const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "fix", post_ids: [ids[i]], dry_run: true, publish: autoPublish });
+          all.push(...r.results);
+        } catch (e: any) {
+          all.push({ post_id: ids[i], ok: false, error: e.message });
+        }
         setResults([...all]);
       }
-      setResults(all);
-      const ok = all.filter((r) => r.ok).length;
+      const wouldChange = all.filter((r) => r.ok && r.would_change).length;
+      const noChange = all.filter((r) => r.ok && !r.would_change).length;
+      toast({ title: `Dry-run complete`, description: `${wouldChange} would change, ${noChange} no-op. No posts modified.` });
+    } catch (e: any) { toast({ title: "Dry-run failed", description: e.message, variant: "destructive" }); }
+    setStatus(""); setFixing(false);
+  };
+
+  const rollbackBatch = async (ids: number[]): Promise<FixResult[]> => {
+    const out: FixResult[] = [];
+    for (let i = 0; i < ids.length; i += 1) {
+      setStatus(`Rollback ${i + 1}/${ids.length} · post ${ids[i]}`);
+      try {
+        const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "rollback", post_ids: [ids[i]] });
+        out.push(...r.results);
+      } catch (e: any) {
+        out.push({ post_id: ids[i], ok: false, error: e.message });
+      }
+    }
+    return out;
+  };
+
+  const rollbackAllSucceeded = async () => {
+    if (!results) return;
+    const ids = results.filter((r) => r.ok && !r.dry_run && !r.rolled_back).map((r) => r.post_id);
+    if (!ids.length) { toast({ title: "Nothing to rollback" }); return; }
+    if (!confirm(`Rollback ${ids.length} post(s) to their pre-fix backup?`)) return;
+    setFixing(true);
+    const r = await rollbackBatch(ids);
+    setResults((prev) => (prev || []).map((p) => {
+      const m = r.find((x) => x.post_id === p.post_id);
+      return m ? { ...p, ...m } : p;
+    }));
+    const ok = r.filter((x) => x.ok).length;
+    toast({ title: `Rollback done`, description: `${ok}/${ids.length} restored.` });
+    setStatus(""); setFixing(false);
+  };
+
+  const fixAll = async (resume = false) => {
+    if (!items || items.length === 0) return;
+    const willPublish = autoPublish;
+    if (!resume && !confirm(`Re-wrap orphan CSS in ${items.length} post(s)?${willPublish ? " Each post will also be republished to flush CDN caches." : ""}${autoRollback ? " On failure, successfully-fixed posts will be auto-rolled-back." : ""}`)) return;
+    setFixing(true);
+
+    let processed: number[] = [];
+    let priorResults: FixResult[] = results || [];
+    if (resume) {
+      try {
+        const r = await callAudit<{ checkpoint: any }>("wp-bulk-cleanup", { mode: "checkpoint_load", key: CKPT_KEY });
+        if (r.checkpoint?.phase === "fix") {
+          processed = (r.checkpoint.processed_ids as number[]) || [];
+          priorResults = (r.checkpoint.results as FixResult[]) || priorResults;
+          setResults([...priorResults]);
+        }
+      } catch { /* ignore */ }
+    }
+
+    try {
+      const ids = items.map((i) => i.post_id).filter((id) => !processed.includes(id));
+      const all: FixResult[] = [...priorResults];
+      const succeededThisBatch: number[] = [];
+      for (let i = 0; i < ids.length; i += 1) {
+        setStatus(`Fixing ${i + 1}/${ids.length} · post ${ids[i]}${willPublish ? " (+publish)" : ""}`);
+        try {
+          const r = await callAudit<{ results: FixResult[]; fixed: number }>("wp-bulk-cleanup", {
+            mode: "fix", post_ids: [ids[i]], publish: willPublish, run_id: runId,
+          });
+          all.push(...r.results);
+          if (r.results[0]?.ok && !r.results[0]?.dry_run) succeededThisBatch.push(ids[i]);
+          setResults([...all]);
+          processed.push(ids[i]);
+          await saveCheckpoint({ phase: "fix", page: 1, processed_ids: processed, affected: items, results: all });
+
+          if (!r.results[0]?.ok && autoRollback && succeededThisBatch.length > 0) {
+            toast({ title: `Post ${ids[i]} failed`, description: `Auto-rolling back ${succeededThisBatch.length} previously-fixed post(s).`, variant: "destructive" });
+            const rb = await rollbackBatch(succeededThisBatch);
+            const merged = all.map((p) => {
+              const m = rb.find((x) => x.post_id === p.post_id);
+              return m ? { ...p, rolled_back: m.ok } : p;
+            });
+            setResults(merged);
+            throw new Error(`Halted at post ${ids[i]}. Batch rolled back.`);
+          }
+        } catch (e: any) {
+          if (autoRollback && succeededThisBatch.length > 0 && !/Halted/.test(e.message)) {
+            const rb = await rollbackBatch(succeededThisBatch);
+            const merged = all.map((p) => {
+              const m = rb.find((x) => x.post_id === p.post_id);
+              return m ? { ...p, rolled_back: m.ok } : p;
+            });
+            setResults(merged);
+          }
+          throw e;
+        }
+      }
+      await clearCheckpoint();
+      const ok = all.filter((r) => r.ok && !r.rolled_back && !r.dry_run).length;
       const failed = all.filter((r) => !r.ok).length;
       toast({ title: `Cleanup done`, description: `${ok} fixed, ${failed} failed${willPublish ? `, republished` : ""}.` });
-    } catch (e: any) { toast({ title: "Cleanup failed", description: e.message, variant: "destructive" }); }
+    } catch (e: any) {
+      toast({ title: "Cleanup interrupted", description: `${e.message}. Click Resume to continue.`, variant: "destructive" });
+      setResumable({ phase: "fix", page: 0, processed: processed.length, updated_at: new Date().toISOString() });
+    }
     setStatus(""); setFixing(false);
   };
 
