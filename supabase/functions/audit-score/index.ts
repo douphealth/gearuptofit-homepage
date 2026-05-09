@@ -151,6 +151,58 @@ function detectVisualIssues(html: string): Issue[] {
     });
   }
 
+  // ── Extra mobile/desktop layout overflow heuristics ─────────────────
+  // Images with width attribute > 800 px (cut-off on phones, awkward on desktop article columns)
+  const oversizedImgs = imgs.filter((i) => {
+    const w = Number((i.match(/\swidth=["']?(\d{3,})/) || [])[1] || 0);
+    return w > 800;
+  });
+  if (oversizedImgs.length) {
+    issues.push({
+      severity: "high", category: "visual", code: "img-oversize",
+      message: `${oversizedImgs.length} image(s) with width >800px — overflow mobile, awkward on desktop`,
+    });
+  }
+  // Tables with many columns (>=6 <th>/<td> in first row) cut off on mobile
+  const firstRow = (html.match(/<tr\b[^>]*>([\s\S]*?)<\/tr>/i) || [])[1] || "";
+  const colCount = countMatches(firstRow, /<t[hd]\b/gi);
+  if (colCount >= 6) {
+    issues.push({
+      severity: "high", category: "visual", code: "table-many-cols",
+      message: `Table has ${colCount} columns — guaranteed horizontal cut-off on mobile`,
+    });
+  }
+  // Absolute / fixed positioned inline styles (escape document flow → overflow)
+  const absPos = countMatches(html, /style=["'][^"']*position\s*:\s*(?:absolute|fixed)/gi);
+  if (absPos > 0) {
+    issues.push({
+      severity: "medium", category: "visual", code: "abs-positioned",
+      message: `${absPos} element(s) with absolute/fixed positioning — risk of overflow & CLS`,
+    });
+  }
+  // Inline background-image (often huge, no responsive handling)
+  if (/style=["'][^"']*background-image\s*:\s*url\(/i.test(html)) {
+    issues.push({
+      severity: "polish", category: "visual", code: "inline-bg-image",
+      message: "Inline background-image style — bypasses responsive image pipeline",
+    });
+  }
+  // Twitter / Instagram embeds without responsive wrapper
+  const socialEmbeds = countMatches(html, /<blockquote[^>]*class=["'][^"']*(twitter-tweet|instagram-media|tiktok-embed)/gi);
+  if (socialEmbeds && !/gutf-embed-wrap|embed-responsive|aspect-ratio/i.test(html)) {
+    issues.push({
+      severity: "medium", category: "visual", code: "social-embed-overflow",
+      message: `${socialEmbeds} social embed(s) without responsive wrapper`,
+    });
+  }
+  // white-space:nowrap on long inline text — guaranteed horizontal scroll
+  if (countMatches(html, /style=["'][^"']*white-space\s*:\s*nowrap/gi) > 1) {
+    issues.push({
+      severity: "medium", category: "visual", code: "nowrap-overflow",
+      message: "Multiple elements force white-space:nowrap — overflow on narrow screens",
+    });
+  }
+
   return issues;
 }
 
@@ -264,26 +316,70 @@ function detectCwvIssues(html: string): { issues: Issue[]; cwv: any } {
     });
   }
 
-  // Compose CWV sub-score (0-100)
+  // ── Layout-overflow → CLS/LCP impact attribution ───────────────────────
+  const oversizedImgs = imgs.filter((i) => Number((i.match(/\swidth=["']?(\d{3,})/) || [])[1] || 0) > 800).length;
+  const tableUnwrapped = (() => {
+    const total = countMatches(html, /<table\b/gi);
+    const wrapped = countMatches(html, /<(?:div|figure)[^>]*class=["'][^"']*(?:table-wrapper|comparison-table-wrapper|wp-block-table|overflow-x-auto|table-responsive|gutf-table-wrap)[^"']*["'][^>]*>\s*<table/gi);
+    return Math.max(0, total - wrapped);
+  })();
+  const fixedIframes = iframes.filter((i) => /\bwidth=["']?\d{3,}/.test(i) && !/\bstyle=["'][^"']*max-width/i.test(i)).length;
+  const layoutOverflowCount = oversizedImgs + tableUnwrapped + fixedIframes;
+  if (layoutOverflowCount > 0) {
+    issues.push({
+      severity: layoutOverflowCount > 2 ? "high" : "medium",
+      category: "visual", code: "cwv-overflow-impact",
+      message: `${layoutOverflowCount} cut-off/overflow element(s) likely to inflate CLS and shift LCP candidates`,
+    });
+  }
+
+  // Compose CWV sub-score (0-100) — now also penalised for overflow elements
   const cwvWeights: Record<Sev, number> = { critical: 25, high: 15, medium: 8, polish: 3 };
   let cwvPenalty = 0;
   for (const i of issues) cwvPenalty += cwvWeights[i.severity] || 0;
   const cwvScore = HARD(100 - cwvPenalty);
 
+  // Sub-pillar scores — used by the UI to sort by worst LCP / worst CLS.
+  const lcpPenalty =
+    (firstImg && !hasFetchPriority ? 15 : 0) +
+    (firstImg && heroLazy ? 20 : 0) +
+    (firstImg && /\.(jpg|jpeg|png)["'?\s]/i.test(firstImg) ? 8 : 0) +
+    (eagerCount > 2 ? 8 : 0) +
+    (oversizedImgs * 4);
+  const clsPenalty =
+    imgsNoDims.length * 4 +
+    iframesNoDims.length * 4 +
+    adlikeIframes.length * 6 +
+    (/@font-face/i.test(html) ? 5 : 0) +
+    tableUnwrapped * 6 +
+    fixedIframes * 6 +
+    oversizedImgs * 3;
+  const inpPenalty =
+    heavyInline.length * 12 +
+    blockingScripts.length * 10 +
+    (externalScripts.length > 6 ? 8 : 0) +
+    (domNodes > 1500 ? 8 : 0);
+
   return {
     issues,
     cwv: {
       score: cwvScore,
+      lcpScore: HARD(100 - lcpPenalty),
+      clsScore: HARD(100 - clsPenalty),
+      inpScore: HARD(100 - inpPenalty),
       lcp: {
         heroFetchPriority: hasFetchPriority,
         heroLazy,
         heroFormat: /\.(webp|avif)["'?\s]/i.test(firstImg) ? "modern" : (firstImg ? "legacy" : "none"),
         eagerAboveFold: eagerCount,
+        oversizedImages: oversizedImgs,
       },
       cls: {
         imagesMissingDims: imgsNoDims.length,
         iframesMissingDims: iframesNoDims.length,
         adsWithoutReserve: adlikeIframes.length,
+        unwrappedTables: tableUnwrapped,
+        fixedWidthIframes: fixedIframes,
       },
       inp: {
         inlineScripts: inlineScripts.length,
@@ -291,6 +387,7 @@ function detectCwvIssues(html: string): { issues: Issue[]; cwv: any } {
         blockingScripts: blockingScripts.length,
         externalScripts: externalScripts.length,
       },
+      layoutOverflowCount,
       domNodes,
     },
   };

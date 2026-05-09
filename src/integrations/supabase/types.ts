@@ -77,6 +77,42 @@ export type Database = {
         }
         Relationships: []
       }
+      autolink_markers: {
+        Row: {
+          anchor: string
+          applied_at: string
+          content_hash: string | null
+          end_offset: number
+          id: number
+          post_id: number
+          start_offset: number
+          target_id: number
+          target_url: string
+        }
+        Insert: {
+          anchor: string
+          applied_at?: string
+          content_hash?: string | null
+          end_offset: number
+          id?: number
+          post_id: number
+          start_offset: number
+          target_id: number
+          target_url: string
+        }
+        Update: {
+          anchor?: string
+          applied_at?: string
+          content_hash?: string | null
+          end_offset?: number
+          id?: number
+          post_id?: number
+          start_offset?: number
+          target_id?: number
+          target_url?: string
+        }
+        Relationships: []
+      }
       push_log: {
         Row: {
           created_at: string

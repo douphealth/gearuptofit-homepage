@@ -87,14 +87,34 @@ function existingLinks(html: string): Set<string> {
   return out;
 }
 
+// Parse explicit autolink marker ranges from raw/rendered HTML.
+// Returns absolute [start, end] of every <!--gutf:autolink-ID-->...<!--/gutf:autolink-ID-->
+// block (inclusive of both comments). Used to guarantee re-runs never re-wrap
+// content already linked, and never insert a new link that overlaps an existing one.
+function autolinkMarkerRanges(html: string): Array<{ start: number; end: number; targetId: number }> {
+  const out: Array<{ start: number; end: number; targetId: number }> = [];
+  const re = /<!--gutf:autolink-(\d+)-->[\s\S]*?<!--\/gutf:autolink-\1-->/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    out.push({ start: m.index, end: m.index + m[0].length, targetId: Number(m[1]) });
+  }
+  return out;
+}
+function rangeOverlaps(ranges: Array<{ start: number; end: number }>, start: number, end: number): boolean {
+  for (const r of ranges) if (start < r.end && end > r.start) return true;
+  return false;
+}
+
 // Build "safe regions" — text where we can insert anchors. We avoid:
 //   <a>...</a>, <h1-6>, <button>, <code>, <pre>, <script>, <style>,
-//   inside any tag's attributes, and inside our own gutf marker blocks.
+//   inside any tag's attributes, AND inside our own gutf:autolink-* marker blocks.
 function* safeTextSpans(html: string): Generator<{ start: number; end: number }> {
   const blocked = /<(a|h[1-6]|button|code|pre|script|style)\b[^>]*>[\s\S]*?<\/\1>/gi;
   const skip: Array<[number, number]> = [];
   let m: RegExpExecArray | null;
   while ((m = blocked.exec(html)) !== null) skip.push([m.index, m.index + m[0].length]);
+  // Skip explicit autolink marker spans (idempotency)
+  for (const r of autolinkMarkerRanges(html)) skip.push([r.start, r.end]);
   // Also skip everything inside tag brackets <...>
   const tagRe = /<[^>]+>/g;
   while ((m = tagRe.exec(html)) !== null) skip.push([m.index, m.index + m[0].length]);
@@ -233,7 +253,7 @@ async function suggestForPost(supabase: any, sourceId: number, max = 6): Promise
   };
 }
 
-async function applyToLivePost(postId: number, suggestions: Suggestion[]) {
+async function applyToLivePost(supabase: any, postId: number, suggestions: Suggestion[]) {
   const user = Deno.env.get("WP_USERNAME");
   const pass = Deno.env.get("WP_APP_PASSWORD")?.replace(/\s+/g, "");
   if (!user || !pass) throw new Error("WP credentials not configured");
@@ -247,13 +267,22 @@ async function applyToLivePost(postId: number, suggestions: Suggestion[]) {
   let raw: string = post?.content?.raw || "";
   if (!raw) throw new Error("Empty raw content");
 
+  // Existing autolink markers in raw content (live source of truth) +
+  // any markers we've already persisted in DB for this post (defensive).
+  const liveRanges = autolinkMarkerRanges(raw);
+  const existingTargets = new Set<number>(liveRanges.map((r) => r.targetId));
+  const { data: storedMarkers } = await supabase
+    .from("autolink_markers").select("target_id").eq("post_id", postId);
+  for (const m of storedMarkers || []) existingTargets.add(Number(m.target_id));
+
   const linked = existingLinks(raw);
   const usedAnchors = new Set<string>();
-  const applied: Array<{ anchor: string; targetUrl: string }> = [];
+  // Live ranges mutate as we insert — keep working copy
+  const ranges: Array<{ start: number; end: number }> = liveRanges.map((r) => ({ start: r.start, end: r.end }));
+  const applied: Array<{ anchor: string; targetUrl: string; targetId: number; start: number; end: number }> = [];
 
-  // For each suggestion, find anchor in RAW (since raw differs from rendered)
-  // and wrap its first unlinked occurrence inside a safe span.
   for (const s of suggestions) {
+    if (existingTargets.has(s.targetId)) continue;
     if (linked.has(normalizeUrl(s.targetUrl))) continue;
     if (usedAnchors.has(s.anchor.toLowerCase())) continue;
     if (raw.includes(`href="${s.targetUrl}"`) || raw.includes(`href='${s.targetUrl}'`)) continue;
@@ -264,26 +293,40 @@ async function applyToLivePost(postId: number, suggestions: Suggestion[]) {
     let cursor = 0;
     while (cursor < raw.length) {
       const slice = raw.slice(cursor);
-      // Find next match position relative to cursor
       const m = re.exec(slice);
       if (!m) break;
       const absIdx = cursor + m.index;
-      // Check the surrounding context isn't inside an <a> or attribute
+      const matchEnd = absIdx + m[0].length;
+      // Reject overlap with any prior autolink marker range
+      if (rangeOverlaps(ranges, absIdx, matchEnd)) {
+        cursor = matchEnd; continue;
+      }
       const before = raw.slice(Math.max(0, absIdx - 200), absIdx);
       const after = raw.slice(absIdx, Math.min(raw.length, absIdx + 200));
       const insideA = /<a\b[^>]*>(?:(?!<\/a>).)*$/i.test(before) && /^[\s\S]*?<\/a>/i.test(after);
       const insideTag = /<[^>]*$/.test(before);
       const insideHeading = /<h[1-6]\b[^>]*>(?:(?!<\/h[1-6]>).)*$/i.test(before);
       if (!insideA && !insideTag && !insideHeading) {
-        const original = raw.slice(absIdx, absIdx + m[0].length);
-        const replacement = `<!--gutf:autolink-${s.targetId}--><a href="${s.targetUrl}">${original}</a><!--/gutf:autolink-${s.targetId}-->`;
-        raw = raw.slice(0, absIdx) + replacement + raw.slice(absIdx + m[0].length);
-        inserted = true;
-        applied.push({ anchor: original, targetUrl: s.targetUrl });
+        const original = raw.slice(absIdx, matchEnd);
+        const openMarker = `<!--gutf:autolink-${s.targetId}-->`;
+        const closeMarker = `<!--/gutf:autolink-${s.targetId}-->`;
+        const anchorTag = `<a href="${s.targetUrl}">${original}</a>`;
+        const replacement = `${openMarker}${anchorTag}${closeMarker}`;
+        raw = raw.slice(0, absIdx) + replacement + raw.slice(matchEnd);
+        const newEnd = absIdx + replacement.length;
+        // Shift downstream ranges that started after the replaced region
+        const delta = replacement.length - m[0].length;
+        for (const r of ranges) {
+          if (r.start >= matchEnd) { r.start += delta; r.end += delta; }
+        }
+        ranges.push({ start: absIdx, end: newEnd });
+        applied.push({ anchor: original, targetUrl: s.targetUrl, targetId: s.targetId, start: absIdx, end: newEnd });
         usedAnchors.add(s.anchor.toLowerCase());
+        existingTargets.add(s.targetId);
+        inserted = true;
         break;
       }
-      cursor = absIdx + m[0].length;
+      cursor = matchEnd;
     }
     if (!inserted) continue;
   }
@@ -299,6 +342,19 @@ async function applyToLivePost(postId: number, suggestions: Suggestion[]) {
     const t = await updateRes.text();
     throw new Error(`Update ${updateRes.status}: ${t.slice(0, 200)}`);
   }
+
+  // Persist explicit marker ranges (post-update offsets are valid in `raw`).
+  // Hash the saved content so future runs can detect editorial changes.
+  const enc = new TextEncoder().encode(raw);
+  const hashBuf = await crypto.subtle.digest("SHA-256", enc);
+  const contentHash = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+  await supabase.from("autolink_markers").insert(
+    applied.map((a) => ({
+      post_id: postId, target_id: a.targetId, anchor: a.anchor, target_url: a.targetUrl,
+      start_offset: a.start, end_offset: a.end, content_hash: contentHash,
+    })),
+  );
+
   return { applied: applied.length, links: applied };
 }
 
@@ -331,7 +387,7 @@ Deno.serve(async (req) => {
         suggestions = r.suggestions;
       }
       const max = Math.max(1, Math.min(12, Number(body.max) || 6));
-      const out = await applyToLivePost(postId, suggestions.slice(0, max));
+      const out = await applyToLivePost(supabase, postId, suggestions.slice(0, max));
       // Log
       await fetch(`${Deno.env.get("SUPABASE_URL")}/rest/v1/push_log`, {
         method: "POST",

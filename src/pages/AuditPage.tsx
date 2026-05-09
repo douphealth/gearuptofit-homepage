@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/hooks/use-toast";
 import {
   verifyAuditPassword, setAuditPw, getAuditPw, clearAuditPw, callAudit,
@@ -69,6 +70,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [scanning, setScanning] = useState(false);
   const [filter, setFilter] = useState("");
   const [sevFilter, setSevFilter] = useState<"all" | "critical" | "high">("all");
+  const [sortBy, setSortBy] = useState<"worst-overall" | "worst-cwv" | "worst-lcp" | "worst-cls" | "worst-inp">("worst-overall");
   const [selected, setSelected] = useState<Post | null>(null);
   const [progress, setProgress] = useState<string>("");
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
@@ -185,8 +187,20 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     if (sevFilter !== "all") {
       f = f.filter(({ score }) => score?.issues?.some((i) => i.severity === sevFilter));
     }
-    return f.sort((a, b) => (a.score?.score ?? 999) - (b.score?.score ?? 999));
-  }, [posts, scores, filter, sevFilter]);
+    const cwvOf = (s: any, key: string) => {
+      const v = s?.metrics?.cwv?.[key];
+      return typeof v === "number" ? v : 999;
+    };
+    return f.sort((a, b) => {
+      switch (sortBy) {
+        case "worst-cwv": return cwvOf(a.score, "score") - cwvOf(b.score, "score");
+        case "worst-lcp": return cwvOf(a.score, "lcpScore") - cwvOf(b.score, "lcpScore");
+        case "worst-cls": return cwvOf(a.score, "clsScore") - cwvOf(b.score, "clsScore");
+        case "worst-inp": return cwvOf(a.score, "inpScore") - cwvOf(b.score, "inpScore");
+        default: return (a.score?.score ?? 999) - (b.score?.score ?? 999);
+      }
+    });
+  }, [posts, scores, filter, sevFilter, sortBy]);
 
   const stats = useMemo(() => {
     const ss = Object.values(scores);
@@ -226,13 +240,26 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       <BulkCleanupPanel />
 
 
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div className="flex flex-wrap gap-2 mb-4 items-center">
         <Input placeholder="Filter by title…" value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-xs" />
         {(["all", "critical", "high"] as const).map((s) => (
           <Button key={s} size="sm" variant={sevFilter === s ? "default" : "outline"} onClick={() => setSevFilter(s)}>
             {s}
           </Button>
         ))}
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Sort</span>
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}>
+            <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="worst-overall">Worst overall score</SelectItem>
+              <SelectItem value="worst-cwv">Worst Core Web Vitals</SelectItem>
+              <SelectItem value="worst-lcp">Worst LCP</SelectItem>
+              <SelectItem value="worst-cls">Worst CLS</SelectItem>
+              <SelectItem value="worst-inp">Worst INP</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <Card>
@@ -241,6 +268,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             <thead className="bg-muted/40 text-left">
               <tr>
                 <th className="p-3">Score</th>
+                <th className="p-3 hidden sm:table-cell">CWV</th>
                 <th className="p-3">Title</th>
                 <th className="p-3 hidden md:table-cell">Issues</th>
                 <th className="p-3 hidden lg:table-cell">Updated</th>
@@ -248,9 +276,20 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
               </tr>
             </thead>
             <tbody>
-              {ranked.map(({ post, score }) => (
+              {ranked.map(({ post, score }) => {
+                const c: any = (score?.metrics as any)?.cwv;
+                return (
                 <tr key={post.post_id} className="border-t hover:bg-muted/20">
                   <td className={`p-3 font-bold ${scoreColor(score?.score ?? 0)}`}>{score?.score ?? "—"}</td>
+                  <td className="p-3 hidden sm:table-cell text-xs">
+                    {c ? (
+                      <div className="flex gap-1">
+                        <span className={scoreColor(c.lcpScore ?? 0)}>L{c.lcpScore ?? "—"}</span>
+                        <span className={scoreColor(c.clsScore ?? 0)}>C{c.clsScore ?? "—"}</span>
+                        <span className={scoreColor(c.inpScore ?? 0)}>I{c.inpScore ?? "—"}</span>
+                      </div>
+                    ) : <span className="text-muted-foreground">—</span>}
+                  </td>
                   <td className="p-3" dangerouslySetInnerHTML={{ __html: post.title }} />
                   <td className="p-3 hidden md:table-cell">
                     <div className="flex gap-1 flex-wrap">
@@ -267,9 +306,10 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                     <Button size="sm" variant="outline" onClick={() => setSelected(post)}>Open</Button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {!ranked.length && !loading && (
-                <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No posts. Click "Refresh WP" then "Re-score all".</td></tr>
+                <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No posts. Click "Refresh WP" then "Re-score all".</td></tr>
               )}
             </tbody>
           </table>
@@ -767,24 +807,28 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
               </CardHeader>
               <CardContent className="text-xs grid grid-cols-3 gap-3">
                 <div>
-                  <div className="font-semibold mb-1">LCP</div>
+                  <div className="font-semibold mb-1 flex items-center gap-2">LCP <Badge variant="outline">{cwv.lcpScore ?? "—"}</Badge></div>
                   <div className="text-muted-foreground">Hero priority: {cwv.lcp?.heroFetchPriority ? "✓" : "✗"}</div>
                   <div className="text-muted-foreground">Hero lazy: {cwv.lcp?.heroLazy ? "⚠ yes" : "✓ no"}</div>
                   <div className="text-muted-foreground">Format: {cwv.lcp?.heroFormat}</div>
                   <div className="text-muted-foreground">Eager above-fold: {cwv.lcp?.eagerAboveFold}</div>
+                  <div className="text-muted-foreground">Oversized imgs: {cwv.lcp?.oversizedImages ?? 0}</div>
                 </div>
                 <div>
-                  <div className="font-semibold mb-1">CLS</div>
+                  <div className="font-semibold mb-1 flex items-center gap-2">CLS <Badge variant="outline">{cwv.clsScore ?? "—"}</Badge></div>
                   <div className="text-muted-foreground">Imgs no-dims: {cwv.cls?.imagesMissingDims}</div>
                   <div className="text-muted-foreground">Iframes no-dims: {cwv.cls?.iframesMissingDims}</div>
                   <div className="text-muted-foreground">Ads no-reserve: {cwv.cls?.adsWithoutReserve}</div>
+                  <div className="text-muted-foreground">Tables unwrapped: {cwv.cls?.unwrappedTables ?? 0}</div>
+                  <div className="text-muted-foreground">Fixed iframes: {cwv.cls?.fixedWidthIframes ?? 0}</div>
                 </div>
                 <div>
-                  <div className="font-semibold mb-1">INP</div>
+                  <div className="font-semibold mb-1 flex items-center gap-2">INP <Badge variant="outline">{cwv.inpScore ?? "—"}</Badge></div>
                   <div className="text-muted-foreground">Inline scripts: {cwv.inp?.inlineScripts}</div>
                   <div className="text-muted-foreground">Heavy: {cwv.inp?.heavyInlineScripts}</div>
                   <div className="text-muted-foreground">Blocking: {cwv.inp?.blockingScripts}</div>
                   <div className="text-muted-foreground">DOM nodes: {cwv.domNodes}</div>
+                  <div className="text-muted-foreground">Overflow elems: {cwv.layoutOverflowCount ?? 0}</div>
                 </div>
               </CardContent>
             </Card>
