@@ -381,9 +381,37 @@ function containsRunMarker(html: string, runId: string): boolean {
   return !!runId && String(html || "").includes(runMarker(runId));
 }
 
+async function readJsonLimited(res: Response, maxBytes = MAX_WP_JSON_READ_BYTES): Promise<any> {
+  const text = await readLimitedText(res, maxBytes);
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+function compactWpPost(value: any): any {
+  if (!value || typeof value !== "object") return value;
+  return {
+    id: value.id,
+    link: value.link,
+    status: value.status,
+    date_gmt: value.date_gmt,
+    title: { raw: value.title?.raw, rendered: value.title?.rendered },
+    excerpt: { raw: value.excerpt?.raw, rendered: value.excerpt?.rendered },
+    content: { raw: value.content?.raw, rendered: value.content?.rendered },
+  };
+}
+
+function compactRawHtml(raw: string): { raw: string; truncated: boolean } {
+  const value = String(raw || "");
+  if (value.length <= MAX_RAW_TRANSFORM_CHARS) return { raw: value, truncated: false };
+  const head = value.slice(0, Math.floor(MAX_RAW_TRANSFORM_CHARS * 0.82));
+  const tail = value.slice(-Math.floor(MAX_RAW_TRANSFORM_CHARS * 0.18));
+  return { raw: `${head}\n<!--gutf:source-truncated-for-worker-memory-->\n${tail}`, truncated: true };
+}
+
 const LIVE_MIN_VISIBLE_WORDS = 600;
 const LIVE_MIN_VISIBLE_H2 = 3;
-const MAX_HTML_READ_BYTES = 700_000;
+const MAX_HTML_READ_BYTES = 260_000;
+const MAX_WP_JSON_READ_BYTES = 520_000;
+const MAX_RAW_TRANSFORM_CHARS = 220_000;
 
 async function readLimitedText(res: Response, maxBytes = MAX_HTML_READ_BYTES): Promise<string> {
   if (!res.body) return await res.text().catch(() => "");
@@ -1004,7 +1032,7 @@ Deno.serve(async (req) => {
     const r = await fetch(`${WP_BASE}/posts/${postId}?context=${ctx}&_fields=id,link,title,excerpt,content,status,date_gmt`, {
       headers: { Authorization: auth, "User-Agent": "GearupAudit/3.0" },
     });
-    return { ok: r.ok, status: r.status, body: r.ok ? await r.json() : await r.text() };
+    return { ok: r.ok, status: r.status, body: r.ok ? compactWpPost(await readJsonLimited(r)) : await readLimitedText(r, 8_000) };
   }
   let g = await fetchPost("edit");
   if (!g.ok) {
@@ -1018,7 +1046,7 @@ Deno.serve(async (req) => {
     (typeof post?.content?.raw === "string" && post.content.raw) ||
     (typeof post?.content?.rendered === "string" && post.content.rendered) ||
     "";
-  const originalRaw = raw;
+  const originalRaw = raw.length > MAX_RAW_TRANSFORM_CHARS ? "" : raw;
   let contentSource = raw.trim() ? (typeof post?.content?.raw === "string" && post.content.raw ? "rest_raw" : "rest_rendered") : "empty";
   let publicPageHtml = "";
   // If raw is empty (edit context returned rendered-only blank), try view context which always returns rendered HTML
@@ -1058,6 +1086,12 @@ Deno.serve(async (req) => {
     contentSource = hasSlot ? "generated_seed_empty_rest" : "generated_seed_for_empty_template_post";
     await logEvent(postId, `Recovered empty editable content with generated seed (${diag}; live_slot=${hasSlot})`, true);
   }
+  const compactedRaw = compactRawHtml(raw);
+  if (compactedRaw.truncated) {
+    raw = compactedRaw.raw;
+    contentSource = `${contentSource}+truncated_for_worker_memory`;
+  }
+  post = { id: post?.id, link: post?.link, status: post?.status, date_gmt: post?.date_gmt, title: post?.title, excerpt: post?.excerpt };
 
 
   // 1b. Premium AI generation only when explicitly requested; otherwise use
