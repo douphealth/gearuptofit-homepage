@@ -814,21 +814,50 @@ function BulkCleanupPanel() {
           <div className="text-sm text-emerald-500">No posts contain leaked CSS. ✓</div>
         )}
         {items && items.length > 0 && (
-          <div className="overflow-x-auto border rounded-md max-h-72">
+          <div className="overflow-x-auto border rounded-md max-h-96">
             <table className="w-full text-xs">
               <thead className="bg-muted/40 text-left sticky top-0">
-                <tr><th className="p-2">ID</th><th className="p-2">Title</th><th className="p-2">Result</th></tr>
+                <tr>
+                  <th className="p-2">ID</th>
+                  <th className="p-2">Title</th>
+                  <th className="p-2">Result</th>
+                  <th className="p-2">Publish</th>
+                  <th className="p-2">HTTP</th>
+                  <th className="p-2">Diff</th>
+                  <th className="p-2">When</th>
+                </tr>
               </thead>
               <tbody>
                 {items.map((it) => {
                   const res = results?.find((r) => r.post_id === it.post_id);
+                  const ts = res?.completed_at ? new Date(res.completed_at).toLocaleTimeString() : "";
                   return (
                     <tr key={it.post_id} className="border-t">
                       <td className="p-2 font-medium">{it.post_id}</td>
                       <td className="p-2"><a className="text-primary hover:underline" href={it.link} target="_blank" rel="noreferrer">{it.title}</a></td>
                       <td className="p-2">
-                        {res ? (res.ok ? <span className="text-emerald-500">✓ removed {res.removed_chars}c</span> : <span className="text-destructive">✗ {res.error}</span>) : <span className="text-muted-foreground">pending</span>}
+                        {!res ? <span className="text-muted-foreground">pending</span>
+                          : res.dry_run ? (res.would_change
+                              ? <span className="text-amber-500">would change · −{res.removed_chars}c</span>
+                              : <span className="text-muted-foreground">no change</span>)
+                          : res.rolled_back ? <span className="text-amber-500">↺ rolled back</span>
+                          : res.ok ? <span className="text-emerald-500">✓ removed {res.removed_chars}c</span>
+                          : <span className="text-destructive">✗ {res.error}</span>}
                       </td>
+                      <td className="p-2">
+                        {res?.published ? <Badge variant="secondary">published</Badge>
+                          : res?.would_publish ? <Badge variant="outline">would publish</Badge>
+                          : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="p-2 font-mono">
+                        {res?.http_status ? (
+                          <span className={res.http_status >= 200 && res.http_status < 300 ? "text-emerald-500" : "text-destructive"}>{res.http_status}</span>
+                        ) : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="p-2 text-muted-foreground">
+                        {res?.diff ? `Δ${res.diff.chars_delta}c · −${res.diff.wrapper_tags_removed}p · +${res.diff.style_tags_added}<style>` : "—"}
+                      </td>
+                      <td className="p-2 text-muted-foreground">{ts || "—"}</td>
                     </tr>
                   );
                 })}
