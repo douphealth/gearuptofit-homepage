@@ -202,6 +202,49 @@ function canonicalPublicUrl(url: string): string {
   }
 }
 
+function cleanPublicUrl(url: string): string {
+  const canonical = canonicalPublicUrl(url);
+  if (!canonical) return "";
+  try {
+    const u = new URL(canonical);
+    u.search = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return canonical.split("#")[0].split("?")[0];
+  }
+}
+
+async function purgeCloudflareUrl(url: string) {
+  const token = Deno.env.get("CLOUDFLARE_API_TOKEN");
+  const cleanUrl = cleanPublicUrl(url);
+  if (!token || !cleanUrl) return { attempted: false, ok: false, reason: token ? "missing_url" : "missing_token" };
+  try {
+    const zonesRes = await fetch("https://api.cloudflare.com/client/v4/zones?name=gearuptofit.com", {
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    });
+    const zonesText = await zonesRes.text();
+    let zones: any = {}; try { zones = JSON.parse(zonesText); } catch { zones = {}; }
+    const zoneId = zones?.result?.[0]?.id;
+    if (!zonesRes.ok || !zoneId) return { attempted: true, ok: false, stage: "zone_lookup", status: zonesRes.status, detail: zonesText.slice(0, 240) };
+
+    const variants = Array.from(new Set([
+      cleanUrl,
+      cleanUrl.endsWith("/") ? cleanUrl.slice(0, -1) : `${cleanUrl}/`,
+    ]));
+    const purgeRes = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ files: variants }),
+    });
+    const purgeText = await purgeRes.text();
+    let purge: any = {}; try { purge = JSON.parse(purgeText); } catch { purge = {}; }
+    return { attempted: true, ok: purgeRes.ok && purge?.success !== false, status: purgeRes.status, files: variants, detail: purgeText.slice(0, 240) };
+  } catch (e) {
+    return { attempted: true, ok: false, error: String((e as any)?.message || e) };
+  }
+}
+
 function runMarker(runId: string): string {
   return `gutf-publish-run-${runId}`;
 }
