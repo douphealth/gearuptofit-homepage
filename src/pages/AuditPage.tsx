@@ -750,11 +750,18 @@ function BulkCleanupPanel() {
       if (!post) { toast({ title: "No matching post" }); setTargetBusy(false); return; }
       const r = await callAudit<{ results: FixResult[] }>("wp-bulk-cleanup", { mode: "fix", post_ids: [post.post_id], publish: autoPublish });
       setItems([{ ...post, found: true }]);
-      setResults(r.results);
-      const res = r.results[0];
+      const merged: FixResult[] = [...r.results];
+      if (merged[0]?.ok && !merged[0]?.dry_run && autoVerify) {
+        const v = await verifyOne(post.post_id, post.link);
+        merged[0] = { ...merged[0], ...v };
+      }
+      setResults(merged);
+      const res = merged[0];
       toast({
         title: res?.ok ? `Fixed post ${post.post_id}` : `Fix failed`,
-        description: res?.ok ? `Removed ${res.removed_chars} chars of orphan wrappers.` : (res?.error || "Unknown error"),
+        description: res?.ok
+          ? `Removed ${res.removed_chars} chars of orphan wrappers${res.verify ? ` · verify: ${res.verify}` : ""}.`
+          : (res?.error || "Unknown error"),
         variant: res?.ok ? undefined : "destructive",
       });
     } catch (e: any) { toast({ title: "URL fix failed", description: e.message, variant: "destructive" }); }
