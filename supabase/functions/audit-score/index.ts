@@ -769,7 +769,19 @@ Deno.serve(async (req) => {
     const q = supabase.from("audit_scores").select("post_id, score, issues, metrics, scanned_at");
     const { data, error } = requested.length ? await q.in("post_id", requested) : await q.range(0, 4999);
     if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    return new Response(JSON.stringify({ scores: data || [] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const rows = data || [];
+    if (requested.length) {
+      const found = new Set(rows.map((r: any) => Number(r.post_id)));
+      const missing = requested.filter((id: number) => !found.has(id)).map((id: number) => ({
+        post_id: id,
+        score: 0,
+        issues: [{ severity: "critical", category: "content", code: "not-scored", message: "This published URL has not been scored yet — run Re-score all or score this post immediately" }],
+        metrics: { scoredFrom: "missing" },
+        scanned_at: null,
+      }));
+      return new Response(JSON.stringify({ scores: [...rows, ...missing] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ scores: rows }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
   // ── SCAN_ALL chunk (parallel) ────────────────────────────────────────────
