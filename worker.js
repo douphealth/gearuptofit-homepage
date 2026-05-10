@@ -50,7 +50,7 @@ function normalizeApexUrl(value) {
 function lastmodFrom(item) {
   const raw = item.modified_gmt || item.modified || item.date_gmt || item.date;
   if (!raw) return '';
-  const iso = raw.endsWith('Z') ? raw : `${raw.replace('+00:00', '')}Z`;
+  const iso = /(?:Z|[+-]\d\d:\d\d)$/.test(raw) ? raw : `${raw.replace('+00:00', '')}Z`;
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : d.toISOString();
 }
@@ -133,7 +133,7 @@ function buildUrlset(items) {
 }
 
 function buildSitemapIndex() {
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <sitemap><loc>https://${APEX_HOST}/sitemap-posts.xml</loc></sitemap>\n  <sitemap><loc>https://${APEX_HOST}/sitemap-pages.xml</loc></sitemap>\n  <sitemap><loc>https://${APEX_HOST}/sitemap-lovable.xml</loc></sitemap>\n</sitemapindex>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <sitemap><loc>https://${APEX_HOST}/post-sitemap.xml</loc></sitemap>\n  <sitemap><loc>https://${APEX_HOST}/post-sitemap2.xml</loc></sitemap>\n  <sitemap><loc>https://${APEX_HOST}/sitemap-pages.xml</loc></sitemap>\n  <sitemap><loc>https://${APEX_HOST}/sitemap-lovable.xml</loc></sitemap>\n</sitemapindex>`;
 }
 
 function buildLovableSitemap() {
@@ -146,9 +146,9 @@ async function handleSitemap(pathname) {
   }
 
   if (pathname === '/sitemap-posts.xml') {
-    const posts = await fetchAllFromRest('posts');
+    const posts = await fetchAuthoritativePostSitemapItems();
     return xmlResponse(buildUrlset(posts), {
-      headers: { 'x-sitemap-source': 'wp-rest-posts', 'x-url-count': String(posts.length) },
+      headers: { 'x-sitemap-source': 'wp-authoritative-post-sitemaps', 'x-url-count': String(posts.length) },
     });
   }
 
