@@ -1092,7 +1092,7 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
   };
 
   const compactFixesForOverhaul = (value: any) => {
-    const allowed = ["introHtml", "faqHtml", "conclusionHtml", "jsonLd", "metaTitle", "metaDescription", "primaryKeyword", "semanticKeywords", "secondaryKeywords", "entities", "internalLinks", "altTextSuggestions"];
+    const allowed = ["introHtml", "faqHtml", "conclusionHtml", "visualModulesHtml", "jsonLd", "metaTitle", "metaDescription", "primaryKeyword", "semanticKeywords", "secondaryKeywords", "entities", "internalLinks", "altTextSuggestions"];
     const next: Record<string, any> = {};
     for (const key of allowed) if (value?.[key] !== undefined) next[key] = value[key];
     return next;
