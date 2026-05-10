@@ -5,8 +5,8 @@
 //
 // Modes:
 //   { mode: "list", post_ids?: number[] }   → return cached scores
-//   { post_ids: number[] }                   → score N posts (sequential, max 8)
-//   { mode: "scan_all", offset?, limit? }    → score a tiny sequential chunk to protect edge CPU
+//   { post_ids: number[] }                   → score exact cached post IDs synchronously (max 1)
+//   { mode: "scan_all", offset?, limit? }    → legacy exact chunk, synchronous and bounded
 
 import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
@@ -76,6 +76,7 @@ async function fetchPostDetails(postId: number) {
     try {
       const r = await fetch(`${base}/posts/${postId}?_fields=${DETAIL_FIELDS}`, {
         headers: { "User-Agent": "GearupAudit/3.0" },
+        signal: AbortSignal.timeout(3000),
       });
       if (r.ok) return await r.json();
     } catch { /* try next */ }
@@ -150,7 +151,7 @@ async function fetchLiveInspection(url: string): Promise<LiveInspection> {
     const res = await fetch(target, {
       headers: { "User-Agent": "GearupAudit/5.0 (+live-rendered-scoring)", accept: "text/html,application/xhtml+xml" },
       redirect: "follow",
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(5500),
     });
     const raw = await res.text().catch(() => "");
     const html = raw.length > 250_000 ? raw.slice(0, 250_000) : raw;
@@ -766,10 +767,23 @@ Deno.serve(async (req) => {
     const requested = Array.isArray(body?.post_ids)
       ? body.post_ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id)).slice(0, 5000)
       : [];
-    const q = supabase.from("audit_scores").select("post_id, score, issues, metrics, scanned_at");
-    const { data, error } = requested.length ? await q.in("post_id", requested) : await q.range(0, 4999);
-    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    const rows = data || [];
+    let rows: any[] = [];
+    if (requested.length) {
+      for (let i = 0; i < requested.length; i += 500) {
+        const chunk = requested.slice(i, i + 500);
+        const { data, error } = await supabase
+          .from("audit_scores")
+          .select("post_id, score, issues, metrics, scanned_at")
+          .in("post_id", chunk)
+          .range(0, chunk.length - 1);
+        if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        rows.push(...(data || []));
+      }
+    } else {
+      const { data, error } = await supabase.from("audit_scores").select("post_id, score, issues, metrics, scanned_at").range(0, 4999);
+      if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      rows = data || [];
+    }
     if (requested.length) {
       const found = new Set(rows.map((r: any) => Number(r.post_id)));
       const missing = requested.filter((id: number) => !found.has(id)).map((id: number) => ({
@@ -784,10 +798,10 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ scores: rows }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  // ── SCAN_ALL chunk (background) ──────────────────────────────────────────
+  // ── SCAN_ALL exact chunk (sync, bounded) ─────────────────────────────────
   if (body?.mode === "scan_all") {
     const offset = Math.max(0, Number(body.offset) || 0);
-    const limit = Math.max(1, Math.min(2, Number(body.limit) || 2));
+    const limit = Math.max(1, Math.min(1, Number(body.limit) || 1));
     const { data: posts, error } = await supabase
       .from("wp_posts_cache")
       .select("post_id, slug, title, link, modified_at, data")
@@ -795,28 +809,32 @@ Deno.serve(async (req) => {
       .range(offset, offset + limit - 1);
     if (error || !posts) return new Response(JSON.stringify({ error: error?.message || "no cache" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    // Offload heavy scoring to background to stay under the 2s CPU/wall budget
-    // @ts-ignore - EdgeRuntime is provided by Supabase Edge runtime
-    EdgeRuntime.waitUntil((async () => {
-      for (const p of posts) {
-        try { await scoreOneAndPersist(supabase, p); }
-        catch (e) { await persistScoreFailure(supabase, p, e); }
+    const results: Array<{ post_id: number; ok: boolean; score?: number; error?: string }> = [];
+    for (const p of posts) {
+      try {
+        const score = await scoreOneAndPersist(supabase, p);
+        results.push({ post_id: Number(p.post_id), ok: true, score });
+      } catch (e) {
+        await persistScoreFailure(supabase, p, e);
+        results.push({ post_id: Number(p.post_id), ok: false, error: e instanceof Error ? e.message : "unknown error" });
       }
-    })());
+    }
 
     const { count } = await supabase.from("wp_posts_cache").select("*", { count: "exact", head: true });
     return new Response(JSON.stringify({
       scanned: posts.length,
-      queued: true,
+      persisted: results.filter((r) => r.ok).length,
+      failed: results.filter((r) => !r.ok).length,
+      results,
       offset, limit, total: count ?? null,
       done: posts.length < limit,
       nextOffset: offset + posts.length,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  // ── EXPLICIT IDS (background, max 4) ─────────────────────────────────────
+  // ── EXPLICIT IDS (sync, max 1) ───────────────────────────────────────────
   const ids = Array.isArray(body?.post_ids)
-    ? body.post_ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id)).slice(0, 4)
+    ? body.post_ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id)).slice(0, 1)
     : [];
   if (!ids.length) return new Response(JSON.stringify({ error: "post_ids required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
@@ -824,16 +842,18 @@ Deno.serve(async (req) => {
     .select("post_id, slug, title, link, modified_at, data").in("post_id", ids);
   if (!posts || !posts.length) return new Response(JSON.stringify({ error: "no cached posts" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-  // Offload heavy scoring to background; client polls list mode for updates
-  // @ts-ignore - EdgeRuntime is provided by Supabase Edge runtime
-  EdgeRuntime.waitUntil((async () => {
-    for (const p of posts) {
-      try { await scoreOneAndPersist(supabase, p); }
-      catch (e) { await persistScoreFailure(supabase, p, e); }
+  const results: Array<{ post_id: number; ok: boolean; score?: number; error?: string }> = [];
+  for (const p of posts) {
+    try {
+      const score = await scoreOneAndPersist(supabase, p);
+      results.push({ post_id: Number(p.post_id), ok: true, score });
+    } catch (e) {
+      await persistScoreFailure(supabase, p, e);
+      results.push({ post_id: Number(p.post_id), ok: false, error: e instanceof Error ? e.message : "unknown error" });
     }
-  })());
+  }
 
-  return new Response(JSON.stringify({ scanned: posts.length, queued: true }), {
+  return new Response(JSON.stringify({ scanned: posts.length, persisted: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 });
