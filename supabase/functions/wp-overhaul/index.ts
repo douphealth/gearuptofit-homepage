@@ -641,6 +641,7 @@ function buildSeedContent(fixes: Record<string, any>): string {
   // Note: deliberately NOT injecting an "Recommended Content Structure" outline list.
   // That placeholder rendered as visible bullet points and made the post look empty.
   // Real <section><h2> body content must come from generatePremiumContent.sectionsHtml.
+  if (typeof fixes.visualModulesHtml === "string" && fixes.visualModulesHtml.trim()) blocks.push(`<!--gutf:visual-->${fixes.visualModulesHtml.trim()}<!--/gutf:visual-->`);
   if (typeof fixes.faqHtml === "string" && fixes.faqHtml.trim()) blocks.push(`<!--gutf:faq-->${fixes.faqHtml.trim()}<!--/gutf:faq-->`);
   if (typeof fixes.conclusionHtml === "string" && fixes.conclusionHtml.trim()) blocks.push(`<!--gutf:bottom-line-->${fixes.conclusionHtml.trim()}<!--/gutf:bottom-line-->`);
   return blocks.length ? `<div class="gutf-article gutf-generated-overhaul">\n${blocks.join("\n")}\n</div>` : "";
@@ -903,6 +904,7 @@ function buildStandaloneOverhaulHtml(enriched: Record<string, any>): string {
   let html = `${RESPONSIVE_CSS}\n<div class="gutf-article gutf-generated-overhaul gutf-live-repair">\n`;
   if (enriched.introHtml) html += `<!--gutf:intro-->${ksesSafe(enriched.introHtml)}<!--/gutf:intro-->\n`;
   if (enriched.sectionsHtml) html += `<!--gutf:sections-->${ksesSafe(enriched.sectionsHtml)}<!--/gutf:sections-->\n`;
+  if (enriched.visualModulesHtml) html += `<!--gutf:visual-->${ksesSafe(enriched.visualModulesHtml)}<!--/gutf:visual-->\n`;
   if (enriched.conclusionHtml) html += `<!--gutf:bottom-line-->${ksesSafe(enriched.conclusionHtml)}<!--/gutf:bottom-line-->\n`;
   if (enriched.faqHtml) html += `<!--gutf:faq-->${ksesSafe(enriched.faqHtml)}<!--/gutf:faq-->\n`;
   html += `</div>`;

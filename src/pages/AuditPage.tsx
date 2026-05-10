@@ -1092,7 +1092,7 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
   };
 
   const compactFixesForOverhaul = (value: any) => {
-    const allowed = ["introHtml", "faqHtml", "conclusionHtml", "jsonLd", "metaTitle", "metaDescription", "primaryKeyword", "semanticKeywords", "secondaryKeywords", "entities", "internalLinks", "altTextSuggestions"];
+    const allowed = ["introHtml", "faqHtml", "conclusionHtml", "visualModulesHtml", "jsonLd", "metaTitle", "metaDescription", "primaryKeyword", "semanticKeywords", "secondaryKeywords", "entities", "internalLinks", "altTextSuggestions"];
     const next: Record<string, any> = {};
     for (const key of allowed) if (value?.[key] !== undefined) next[key] = value[key];
     return next;
@@ -1407,6 +1407,17 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
                   </CardContent></Card>
               )}
               {fixes.conclusionHtml && <FixBlock label="Bottom Line / Conclusion HTML" value={fixes.conclusionHtml} mono />}
+              {fixes.visualModulesHtml && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Visual modules (premium magazine HTML)</CardTitle>
+                  </CardHeader>
+                  <div className="p-4 pt-0 space-y-3">
+                    <div className="rounded border border-border bg-white text-black p-4 max-h-[480px] overflow-auto" dangerouslySetInnerHTML={{ __html: String(fixes.visualModulesHtml) }} />
+                    <FixBlock label="Visual modules HTML (raw)" value={String(fixes.visualModulesHtml)} mono />
+                  </div>
+                </Card>
+              )}
               {fixes.internalLinks && (
                 <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Internal links</CardTitle></CardHeader>
                   <CardContent className="space-y-1 text-sm">

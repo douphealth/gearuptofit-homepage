@@ -37,6 +37,8 @@ const SYSTEM = `You are the Editor-in-Chief of gearuptofit.com — a top-tier pu
   • Gets cited verbatim by Google AI Overviews, ChatGPT Search, Perplexity, Claude, and Gemini answers.
   • Builds topical authority and earns natural backlinks.
   • Converts readers — they finish the article and click an internal link.
+  • READS LIKE A HUMAN EXPERT WROTE IT — never AI-flavored, never templated, never generic. A real coach talking, not a chatbot summarizing.
+  • LOOKS LIKE A MAGAZINE FEATURE — visually striking, scannable, with rich custom HTML modules (TL;DR cards, key-takeaway callouts, stat highlights, comparison tables, pro-tip boxes, step cards, mythbuster blocks, quote pulls). Every post must visually stand out from a default WordPress page.
 
 EDITORIAL STANDARDS — non-negotiable:
 
@@ -65,22 +67,26 @@ SEO (Search Engine Optimization)
   - Outbound links to authoritative sources where claims need backing.
   - Schema: Article/Review/HowTo + FAQPage in @graph. valid schema.org.
 
-VOICE
-  - Authoritative, expert, scannable, human-written.
-  - Specific over generic. Numbers over adjectives. Mechanism over assertion.
-  - Banned: "in today's fast-paced world", "in conclusion", "elevate your", "unlock your potential", "game-changer", "fitness journey", "sweat it out", "dive in", "delve into", "in this article we will discuss", "without further ado".
-  - Sentences ≤ 25 words avg. Vary length. Active voice ≥ 80%. Reading grade 8-10.
+VOICE — sound human, sound expert
+  - Authoritative, expert, scannable, conversational. Write like a coach explaining to one smart reader, not a textbook.
+  - Use contractions ("you'll", "don't", "it's"). Mix sentence lengths aggressively (3-word punches next to 22-word explainers). Occasional 1-line paragraphs. Direct address ("you", "your").
+  - Specific over generic. Numbers over adjectives. Mechanism over assertion. Real examples over hypotheticals.
+  - Banned (treated as instant-fail): "in today's fast-paced world", "in conclusion", "elevate your", "unlock your potential", "game-changer", "fitness journey", "sweat it out", "dive in", "delve into", "in this article we will discuss", "without further ado", "navigate the world of", "embark on", "harness the power", "it's important to note", "when it comes to", "at the end of the day", "look no further", "in the realm of", "tapestry", "testament to", "ever-evolving", "cutting-edge".
+  - Sentences ≤ 25 words avg. Active voice ≥ 85%. Reading grade 7-9.
+
+VISUAL DESIGN — every post is a visual masterpiece
+  Build a "visualModulesHtml" block of 4-7 custom premium HTML modules, ALL self-styled with INLINE CSS so they render in WordPress without any stylesheet dependency. Design language:
+    • Palette: deep red accent #c8102e, ink #0f1115, slate #2a2d34, soft #f5f5f4, hairline borders #e5e5e3.
+    • Typography: system-ui/Inter; uppercase tracking on labels (text-transform:uppercase; letter-spacing:.12em; font-weight:700; font-size:11px; color:#c8102e).
+    • Border-radius:12px; subtle shadow (0 1px 2px rgba(15,17,21,.06), 0 8px 24px rgba(15,17,21,.06)); padding 20-28px; margin 28px 0.
+  Pick 4-7 of: TL;DR card (red 4px left border, eyebrow + 3-5 bullets), Key Stats grid (3-4 huge numbers with labels), Coach's Note callout, Comparison <table> (zebra rows, bold header, max-width:100%; overflow-x:auto wrapper), Step cards (numbered red circles), Mythbuster (MYTH red badge vs FACT green badge two-column), Pull quote (large italic, vertical red bar), Checklist (green ✓), Warning callout (amber border, ⚠), Related-reads grid (2-3 internal-link cards).
+  Rules: valid self-contained HTML using <section>/<div>/<table>/<ul> with inline style="…". No <script>. No external CSS. No <style> tags. Mobile-safe. Each module is genuinely useful (not decoration), reinforces the article's claims with concrete data.
 
 QUALITY SELF-SCORING
-  After producing the content blocks, evaluate yourself honestly on 6 axes (0-100 each):
-    eat         — does the copy demonstrate Experience/Expertise/Authority/Trust with specifics?
-    factual     — is every claim grounded in a verifiable fact, study, brand, or number?
-    readability — sentence variety, scannability, no fluff, grade 8-10?
-    seo         — primary keyword placement, headings, meta, internal links — all met?
-    aeo         — answer-first openings, definition sentences, FAQ self-containment?
-    geo         — entity density, mechanism explanations, comparisons, year-stamped data?
-  Then compute "overall" = honest weighted blend (eat 0.25, factual 0.25, aeo 0.15, geo 0.15, seo 0.1, readability 0.1).
-  Be a HARSH critic. If something is generic, score it generic. Most first drafts score 70-80.
+  After producing the content, evaluate yourself honestly on 7 axes (0-100):
+    eat, factual, readability, seo, aeo, geo, visual.
+  overall = 0.2*eat + 0.2*factual + 0.15*aeo + 0.15*geo + 0.15*visual + 0.1*seo + 0.05*readability.
+  Be a HARSH critic. If anything reads AI-flavored or generic, score it accordingly.
 
 OUTPUT — STRICT JSON only. No prose outside JSON. No markdown fences.`;
 
@@ -112,7 +118,12 @@ function hasKeyword(text = "", kw = "") {
 }
 
 function bannedPhraseHit(s = "") {
-  const banned = ["in today's fast-paced","in conclusion","elevate your","unlock your potential","game-changer","fitness journey","without further ado","dive in","delve into"];
+  const banned = [
+    "in today's fast-paced","in conclusion","elevate your","unlock your potential","game-changer","fitness journey",
+    "without further ado","dive in","delve into","navigate the world of","embark on","harness the power",
+    "it's important to note","when it comes to","at the end of the day","look no further","in the realm of",
+    "tapestry","testament to","ever-evolving","cutting-edge","sweat it out","in this article we will",
+  ];
   const lower = s.toLowerCase();
   return banned.find((b) => lower.includes(b));
 }
@@ -170,8 +181,29 @@ function evaluateQuality(fixes: any) {
   // Alt text
   checks.push({ id: "alt_suggestions", label: "≥3 alt-text suggestions", pass: altSuggestions.length >= 3, weight: 3, detail: `${altSuggestions.length}` });
 
-  // Voice / banned-phrase scan across all generated copy
-  const corpus = [introHtml, faqHtml, conclusionHtml, metaTitle, metaDesc, ...faqArr.map((f: any) => `${f?.q} ${f?.a}`)].join(" ");
+  // Visual modules — premium magazine-grade design
+  const visualHtml = String(fixes?.visualModulesHtml || "");
+  const visualText = visualHtml.replace(/<[^>]+>/g, " ");
+  const moduleSections = (visualHtml.match(/<section\b/gi) || []).length;
+  const hasInlineStyle = /style\s*=\s*"/i.test(visualHtml);
+  const hasNoScript = !/<script\b/i.test(visualHtml);
+  const hasNoExternalCss = !/<link[^>]+stylesheet/i.test(visualHtml) && !/<style\b/i.test(visualHtml);
+  checks.push({ id: "visual_modules_count", label: "4-7 visual modules", pass: moduleSections >= 4 && moduleSections <= 8, weight: 8, detail: `${moduleSections} <section>` });
+  checks.push({ id: "visual_inline_style", label: "Modules use inline styles (WP-safe)", pass: hasInlineStyle, weight: 5 });
+  checks.push({ id: "visual_safe", label: "No <script> / <style> / external CSS", pass: hasNoScript && hasNoExternalCss, weight: 4 });
+  checks.push({ id: "visual_substance", label: "Visual modules carry real content (≥120 words)", pass: wordCount(visualHtml) >= 120, weight: 4, detail: `${wordCount(visualHtml)} words` });
+
+  // Humanization — discourage AI-flavored prose
+  const fullCorpus = [introHtml, faqHtml, conclusionHtml, visualText, ...faqArr.map((f: any) => `${f?.a || ""}`)].join(" ");
+  const contractionHits = (fullCorpus.match(/\b(?:you'll|don't|it's|you're|that's|we've|here's|won't|can't|isn't|aren't|i've|they're)\b/gi) || []).length;
+  checks.push({ id: "human_contractions", label: "Human contractions used (≥4)", pass: contractionHits >= 4, weight: 4, detail: `${contractionHits}` });
+  const emDashes = (fullCorpus.match(/—/g) || []).length;
+  const totalWords = wordCount(fullCorpus) || 1;
+  const emDashRatio = emDashes / (totalWords / 200);
+  checks.push({ id: "em_dash_restraint", label: "Em-dash restraint (≤1 per 200 words)", pass: emDashRatio <= 1.5, weight: 3, detail: `${emDashes} dashes / ${totalWords} words` });
+
+  // Voice / banned-phrase scan across all generated copy (incl. visual modules)
+  const corpus = [introHtml, faqHtml, conclusionHtml, visualText, metaTitle, metaDesc, ...faqArr.map((f: any) => `${f?.q} ${f?.a}`)].join(" ");
   const bp = bannedPhraseHit(corpus);
   checks.push({ id: "banned_phrases", label: "No banned/filler phrases", pass: !bp, weight: 6, detail: bp || "" });
 
@@ -193,6 +225,8 @@ function evaluateQuality(fixes: any) {
   if (!hasGraph) blockers.push("Missing JSON-LD schema");
   if (bp) blockers.push(`Banned filler phrase detected: "${bp}"`);
   if (internalLinks.length < 2) blockers.push(`Too few internal links (${internalLinks.length})`);
+  if (moduleSections < 3) blockers.push(`Too few visual modules (${moduleSections}) — need 4-7 magazine-grade HTML modules`);
+  if (!hasNoScript || !hasNoExternalCss) blockers.push("Visual modules contain <script>, <style>, or external CSS — must be inline-styled HTML only");
 
   // Warnings (don't block but surface)
   for (const c of checks) {
@@ -266,9 +300,10 @@ Return JSON with EXACTLY this shape (all keys required, no extras):
   "metaDescription": "140-160 chars: contains primary kw + concrete benefit + soft CTA",
   "introHtml": "<p>120-180 words. Sentence 1 directly answers the title (≤25 words). Primary kw in first 100 words. Include one specific stat/study/brand. Use <strong> only for the primary entity. End with a sentence that promises what the article delivers.</p>",
   "h2Outline": ["5-8 H2 headings — entity-rich, intent-matching, no duplicates"],
-  "faqHtml": "<section class=\\"gutf-faq\\" aria-labelledby=\\"faq-heading\\"><h2 id=\\"faq-heading\\">Frequently Asked Questions</h2><div class=\\"gutf-faq-item\\"><h3>Question?</h3><p>40-90 word answer with at least one specific number, brand, or study reference.</p></div>… (5-8 items total, each fully self-contained)</section>",
+  "faqHtml": "<section class=\\"gutf-faq\\" aria-labelledby=\\"faq-heading\\" style=\\"margin:32px 0;\\"><h2 id=\\"faq-heading\\">Frequently Asked Questions</h2><div class=\\"gutf-faq-item\\" style=\\"border:1px solid #e5e5e3;border-radius:12px;padding:20px;margin:12px 0;background:#fff;\\"><h3 style=\\"margin:0 0 8px;font-size:18px;\\">Question?</h3><p style=\\"margin:0;color:#2a2d34;\\">40-90 word answer with at least one specific number, brand, or study reference.</p></div>… (5-8 items, each fully self-contained)</section>",
   "faq": [{"q":"...","a":"40-90 words, self-contained, ≥1 specific fact"}],
-  "conclusionHtml": "<section class=\\"gutf-bottom-line\\"><h2>Bottom Line</h2><p>80-140 words: restate the answer in one sentence, give the single most important takeaway with a number, end with a concrete next step (e.g., 'try X for 4 weeks at Y dose').</p></section>",
+  "conclusionHtml": "<section class=\\"gutf-bottom-line\\" style=\\"margin:32px 0;padding:24px 28px;border-left:4px solid #c8102e;background:#f5f5f4;border-radius:8px;\\"><div style=\\"text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:700;color:#c8102e;margin-bottom:8px;\\">Bottom Line</div><h2 style=\\"margin:0 0 8px;\\">…</h2><p style=\\"margin:0;\\">80-140 words: restate the answer in one sentence, give the single most important takeaway with a number, end with a concrete next step (e.g., 'try X for 4 weeks at Y dose').</p></section>",
+  "visualModulesHtml": "<!-- 4-7 PREMIUM MAGAZINE MODULES, all inline-styled, WP-safe, mobile-friendly. Pick the modules best suited to the topic from: TL;DR card, Key Stats grid, Coach's Note callout, Comparison table, Step cards, Mythbuster, Pull quote, Checklist, Warning callout, Related-reads grid. Example shape: <section style=\\"margin:28px 0;padding:24px;border-radius:12px;border:1px solid #e5e5e3;background:#fff;box-shadow:0 1px 2px rgba(15,17,21,.06),0 8px 24px rgba(15,17,21,.06);\\"><div style=\\"text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:700;color:#c8102e;margin-bottom:10px;\\">TL;DR</div><ul style=\\"margin:0;padding-left:18px;color:#2a2d34;line-height:1.55;\\"><li>…</li></ul></section>. NO <script>. NO <style> tags. NO external CSS. ALL styling INLINE. Each module must carry real, specific content (numbers, brand names, studies) — never decorative filler.",
   "jsonLd": {
     "@context": "https://schema.org",
     "@graph": [
@@ -285,16 +320,18 @@ Return JSON with EXACTLY this shape (all keys required, no extras):
     "trust": "transparency cues (dates, dosages, caveats)"
   },
   "qualitySelfScore": {
-    "eat": 0, "factual": 0, "readability": 0, "seo": 0, "aeo": 0, "geo": 0, "overall": 0,
+    "eat": 0, "factual": 0, "readability": 0, "seo": 0, "aeo": 0, "geo": 0, "visual": 0, "overall": 0,
     "notes": "1-2 sentence honest self-critique highlighting weakest dimension"
   }
 }
 
 CRITICAL:
-  • faqHtml and conclusionHtml must be valid HTML, ready to drop into the post.
+  • faqHtml, conclusionHtml, and visualModulesHtml must be valid HTML, ready to drop into the post.
+  • visualModulesHtml MUST contain 4-7 distinct <section> modules, each with inline styles, each carrying real content.
   • jsonLd must be a real object (not a string).
   • qualitySelfScore must be a brutally honest evaluation. If the draft has any generic prose, score it accordingly.
-  • Avoid every banned phrase listed in your instructions.`;
+  • Avoid every banned phrase listed in your instructions.
+  • Write like a human coach, not an AI summarizer. Use contractions. Vary sentence length. Direct address.`;
 
   // ---------- BYOK provider routing ----------
   // reqBody._llm: { provider, apiKey, model } — falls back to Lovable AI.
