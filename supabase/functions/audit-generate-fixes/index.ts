@@ -121,7 +121,7 @@ CRITICAL: faqHtml and conclusionHtml MUST be valid HTML strings ready to drop in
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-2.5-pro",
+      model: "google/gemini-2.5-flash",
       messages: [
         { role: "system", content: SYSTEM },
         { role: "user", content: userPrompt },
