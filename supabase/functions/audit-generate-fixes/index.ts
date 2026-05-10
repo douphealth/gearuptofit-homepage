@@ -225,6 +225,8 @@ function evaluateQuality(fixes: any) {
   if (!hasGraph) blockers.push("Missing JSON-LD schema");
   if (bp) blockers.push(`Banned filler phrase detected: "${bp}"`);
   if (internalLinks.length < 2) blockers.push(`Too few internal links (${internalLinks.length})`);
+  if (moduleSections < 3) blockers.push(`Too few visual modules (${moduleSections}) — need 4-7 magazine-grade HTML modules`);
+  if (!hasNoScript || !hasNoExternalCss) blockers.push("Visual modules contain <script>, <style>, or external CSS — must be inline-styled HTML only");
 
   // Warnings (don't block but surface)
   for (const c of checks) {
