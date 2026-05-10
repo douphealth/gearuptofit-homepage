@@ -563,9 +563,83 @@ function scorePost(post: any): { score: number; issues: Issue[]; metrics: any } 
   };
 }
 
+/**
+ * Probe the LIVE public URL of a post to catch:
+ *   - 404 / "Not Found" pages still indexed in WP REST cache
+ *   - Pages that return 200 but render an empty / "page you requested could not be found" body
+ * Returns a critical issue + a forced low score when broken.
+ */
+async function probeLiveUrl(url: string): Promise<{ issue: Issue | null; forcedScore: number | null }> {
+  if (!url || !/^https?:\/\//i.test(url)) return { issue: null, forcedScore: null };
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "GearupAudit/3.0 (+live-probe)", accept: "text/html" },
+      redirect: "follow",
+    });
+    const status = res.status;
+    const html = await res.text().catch(() => "");
+    const bodyText = stripHtml(
+      (html.match(/<main[\s\S]*?<\/main>/i)?.[0] || html.match(/<article[\s\S]*?<\/article>/i)?.[0] || html)
+        .replace(/<script[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[\s\S]*?<\/style>/gi, "")
+        .replace(/<nav[\s\S]*?<\/nav>/gi, "")
+        .replace(/<footer[\s\S]*?<\/footer>/gi, ""),
+    );
+    const wc = bodyText.split(/\s+/).filter(Boolean).length;
+    const looks404 =
+      status === 404 ||
+      /\bpage you requested could not be found\b/i.test(html) ||
+      /<title>[^<]*\b(404|not found|page not found)\b[^<]*<\/title>/i.test(html) ||
+      /\bnothing found\b.*\bsearching will help\b/is.test(html);
+    if (looks404) {
+      return {
+        issue: {
+          severity: "critical",
+          category: "content",
+          code: "live-404",
+          message: `Live URL returns Not Found (HTTP ${status}) — "${url}" is broken or unpublished`,
+        },
+        forcedScore: 1,
+      };
+    }
+    if (wc < 80) {
+      return {
+        issue: {
+          severity: "critical",
+          category: "content",
+          code: "live-empty",
+          message: `Live URL renders empty content (${wc} words in <main>) — broken template, missing body, or stripped post`,
+        },
+        forcedScore: 5,
+      };
+    }
+    return { issue: null, forcedScore: null };
+  } catch (e) {
+    return {
+      issue: {
+        severity: "high",
+        category: "content",
+        code: "live-unreachable",
+        message: `Live URL unreachable: ${(e as Error).message}`,
+      },
+      forcedScore: null,
+    };
+  }
+}
+
 async function scoreOneAndPersist(supabase: any, post: any) {
   const details = await fetchPostDetails(Number(post.post_id));
   const r = scorePost({ ...post, data: details || post.data });
+
+  // ── Live URL probe — catches 404s and empty rendered bodies ──────────────
+  const liveUrl = post.link || details?.link || "";
+  const probe = await probeLiveUrl(liveUrl);
+  if (probe.issue) {
+    // Prepend so it surfaces at the top of the issues column
+    r.issues = [probe.issue, ...r.issues];
+    if (probe.forcedScore !== null) r.score = probe.forcedScore;
+  }
+
   const now = new Date().toISOString();
   await supabase.from("audit_scores").upsert(
     { post_id: post.post_id, score: r.score, issues: r.issues, metrics: r.metrics, scanned_at: now },
