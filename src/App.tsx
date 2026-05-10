@@ -12,6 +12,7 @@ import HealthPage from "./pages/HealthPage.tsx";
 import ReviewsPage from "./pages/ReviewsPage.tsx";
 import CalculatorsPage from "./pages/CalculatorsPage.tsx";
 import AuditPage from "./pages/AuditPage.tsx";
+import ExplorePage from "./pages/ExplorePage.tsx";
 
 const queryClient = new QueryClient();
 
