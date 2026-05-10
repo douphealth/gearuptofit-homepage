@@ -12,6 +12,7 @@ const AUTHORITATIVE_POST_SITEMAPS = [
 const PER_PAGE = 50;
 const FIELDS = "id,slug,link,title,modified_gmt,date_gmt";
 const MAX_MISSING = 500;
+let sitemapCache: { at: number; entries: SitemapEntry[] } | null = null;
 
 type WpPost = {
   id: number;
@@ -83,6 +84,7 @@ function parseSitemapEntries(xml: string): SitemapEntry[] {
 }
 
 async function getAuthoritativeSitemapEntries(): Promise<SitemapEntry[]> {
+  if (sitemapCache && Date.now() - sitemapCache.at < 5 * 60 * 1000) return sitemapCache.entries;
   const seen = new Set<string>();
   const all: SitemapEntry[] = [];
   for (const sitemap of AUTHORITATIVE_POST_SITEMAPS) {
@@ -93,6 +95,7 @@ async function getAuthoritativeSitemapEntries(): Promise<SitemapEntry[]> {
       all.push(entry);
     }
   }
+  sitemapCache = { at: Date.now(), entries: all };
   return all;
 }
 
