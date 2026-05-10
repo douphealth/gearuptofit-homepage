@@ -784,10 +784,10 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ scores: rows }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  // ── SCAN_ALL chunk (background) ──────────────────────────────────────────
+  // ── SCAN_ALL exact chunk (sync, bounded) ─────────────────────────────────
   if (body?.mode === "scan_all") {
     const offset = Math.max(0, Number(body.offset) || 0);
-    const limit = Math.max(1, Math.min(2, Number(body.limit) || 2));
+    const limit = Math.max(1, Math.min(1, Number(body.limit) || 1));
     const { data: posts, error } = await supabase
       .from("wp_posts_cache")
       .select("post_id, slug, title, link, modified_at, data")
@@ -795,28 +795,32 @@ Deno.serve(async (req) => {
       .range(offset, offset + limit - 1);
     if (error || !posts) return new Response(JSON.stringify({ error: error?.message || "no cache" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    // Offload heavy scoring to background to stay under the 2s CPU/wall budget
-    // @ts-ignore - EdgeRuntime is provided by Supabase Edge runtime
-    EdgeRuntime.waitUntil((async () => {
-      for (const p of posts) {
-        try { await scoreOneAndPersist(supabase, p); }
-        catch (e) { await persistScoreFailure(supabase, p, e); }
+    const results: Array<{ post_id: number; ok: boolean; score?: number; error?: string }> = [];
+    for (const p of posts) {
+      try {
+        const score = await scoreOneAndPersist(supabase, p);
+        results.push({ post_id: Number(p.post_id), ok: true, score });
+      } catch (e) {
+        await persistScoreFailure(supabase, p, e);
+        results.push({ post_id: Number(p.post_id), ok: false, error: e instanceof Error ? e.message : "unknown error" });
       }
-    })());
+    }
 
     const { count } = await supabase.from("wp_posts_cache").select("*", { count: "exact", head: true });
     return new Response(JSON.stringify({
       scanned: posts.length,
-      queued: true,
+      persisted: results.filter((r) => r.ok).length,
+      failed: results.filter((r) => !r.ok).length,
+      results,
       offset, limit, total: count ?? null,
       done: posts.length < limit,
       nextOffset: offset + posts.length,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  // ── EXPLICIT IDS (background, max 4) ─────────────────────────────────────
+  // ── EXPLICIT IDS (sync, max 1) ───────────────────────────────────────────
   const ids = Array.isArray(body?.post_ids)
-    ? body.post_ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id)).slice(0, 4)
+    ? body.post_ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id)).slice(0, 1)
     : [];
   if (!ids.length) return new Response(JSON.stringify({ error: "post_ids required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
@@ -824,16 +828,18 @@ Deno.serve(async (req) => {
     .select("post_id, slug, title, link, modified_at, data").in("post_id", ids);
   if (!posts || !posts.length) return new Response(JSON.stringify({ error: "no cached posts" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-  // Offload heavy scoring to background; client polls list mode for updates
-  // @ts-ignore - EdgeRuntime is provided by Supabase Edge runtime
-  EdgeRuntime.waitUntil((async () => {
-    for (const p of posts) {
-      try { await scoreOneAndPersist(supabase, p); }
-      catch (e) { await persistScoreFailure(supabase, p, e); }
+  const results: Array<{ post_id: number; ok: boolean; score?: number; error?: string }> = [];
+  for (const p of posts) {
+    try {
+      const score = await scoreOneAndPersist(supabase, p);
+      results.push({ post_id: Number(p.post_id), ok: true, score });
+    } catch (e) {
+      await persistScoreFailure(supabase, p, e);
+      results.push({ post_id: Number(p.post_id), ok: false, error: e instanceof Error ? e.message : "unknown error" });
     }
-  })());
+  }
 
-  return new Response(JSON.stringify({ scanned: posts.length, queued: true }), {
+  return new Response(JSON.stringify({ scanned: posts.length, persisted: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 });
