@@ -9,7 +9,7 @@
 //   - primaryKeyword, secondaryKeywords
 //   - metaTitle, metaDescription
 //
-// Uses google/gemini-2.5-pro for top-tier reasoning. Cached 24h.
+// Uses google/gemini-2.5-flash with a premium-quality system prompt. Cached 24h.
 
 import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
@@ -121,7 +121,7 @@ CRITICAL: faqHtml and conclusionHtml MUST be valid HTML strings ready to drop in
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-2.5-pro",
+      model: "google/gemini-2.5-flash",
       messages: [
         { role: "system", content: SYSTEM },
         { role: "user", content: userPrompt },
