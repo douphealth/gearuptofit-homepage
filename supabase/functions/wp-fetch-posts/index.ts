@@ -356,7 +356,7 @@ Deno.serve(async (req) => {
     if (mode === "start") {
       const run = await createRun(supabase);
       const diagnostics = await getDiagnostics(supabase, run.id);
-      return json({ run, ...diagnostics });
+      return json(diagnostics);
     }
 
     if (mode === "continue") {

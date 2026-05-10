@@ -526,7 +526,7 @@ function scorePost(post: any): { score: number; issues: Issue[]; metrics: any } 
 
   // Images & links
   const imgs = html.match(/<img[^>]+>/gi) || [];
-  const missingAlt = imgs.filter((i) => !/\salt=["'][^"']+["']/i.test(i)).length;
+  const missingAlt = imgs.filter((i: string) => !/\salt=["'][^"']+["']/i.test(i)).length;
   if (missingAlt > 0) issues.push({ severity: "high", category: "seo", code: "img-alt", message: `${missingAlt} images missing alt text` });
 
   const internal = countMatches(html, /href=["']https?:\/\/(?:www\.|origin\.)?gearuptofit\.com/gi);
