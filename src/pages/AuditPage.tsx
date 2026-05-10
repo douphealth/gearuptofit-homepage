@@ -1334,6 +1334,62 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
                 </Button>
               </div>
               <FixBlock label="Primary keyword" value={fixes.primaryKeyword || "—"} />
+
+              {/* PREMIUM QUALITY GATE */}
+              {(fixes as any).qualityScore !== undefined && (() => {
+                const qScore: number = Number((fixes as any).qualityScore || 0);
+                const verdict: string = (fixes as any).qualityVerdict || "review";
+                const blockers: string[] = (fixes as any).blockers || [];
+                const warnings: string[] = (fixes as any).warnings || [];
+                const breakdown: any[] = (fixes as any).qualityBreakdown || [];
+                const verdictColor = verdict === "publish" ? "text-emerald-500" : verdict === "review" ? "text-amber-500" : "text-destructive";
+                const verdictBg = verdict === "publish" ? "bg-emerald-500/10 border-emerald-500/30" : verdict === "review" ? "bg-amber-500/10 border-amber-500/30" : "bg-destructive/10 border-destructive/30";
+                return (
+                  <Card className={verdictBg}>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center justify-between">
+                        <span>Premium quality gate</span>
+                        <span className={`text-2xl font-bold ${verdictColor}`}>{qScore}/100</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-xs">
+                      <div className={`font-medium uppercase tracking-wide ${verdictColor}`}>
+                        Verdict: {verdict} {verdict === "publish" ? "✓" : verdict === "review" ? "⚠" : "✕"}
+                      </div>
+                      {blockers.length > 0 && (
+                        <div>
+                          <div className="text-destructive font-medium">Blockers ({blockers.length}) — publish disabled:</div>
+                          <ul className="list-disc list-inside text-destructive/90">{blockers.map((b, i) => <li key={i}>{b}</li>)}</ul>
+                        </div>
+                      )}
+                      {warnings.length > 0 && (
+                        <details>
+                          <summary className="cursor-pointer text-amber-500 font-medium">Warnings ({warnings.length})</summary>
+                          <ul className="list-disc list-inside text-muted-foreground mt-1">{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+                        </details>
+                      )}
+                      <details>
+                        <summary className="cursor-pointer text-muted-foreground">Full breakdown ({breakdown.length} checks)</summary>
+                        <div className="mt-2 grid grid-cols-1 gap-1">
+                          {breakdown.map((c: any, i: number) => (
+                            <div key={i} className={`flex justify-between gap-2 ${c.pass ? "text-emerald-500/90" : "text-destructive/90"}`}>
+                              <span>{c.pass ? "✓" : "✕"} {c.label}</span>
+                              {c.detail && <span className="text-muted-foreground">{c.detail}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                      {(fixes as any).eatSignals && (
+                        <details>
+                          <summary className="cursor-pointer text-muted-foreground">E-E-A-T signals</summary>
+                          <pre className="text-[10px] whitespace-pre-wrap mt-1">{JSON.stringify((fixes as any).eatSignals, null, 2)}</pre>
+                        </details>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+
               <FixBlock label="Meta title" value={fixes.metaTitle || ""} />
               <FixBlock label="Meta description" value={fixes.metaDescription || ""} />
               {fixes.introHtml && <FixBlock label="Intro (HTML, ready to inject)" value={fixes.introHtml} mono />}
@@ -1360,14 +1416,21 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
               {fixes.jsonLd && <FixBlock label="JSON-LD schema" value={JSON.stringify(fixes.jsonLd, null, 2)} mono />}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <Button onClick={() => fullOverhaul(false)} disabled={pushing} className="w-full" variant="destructive">
-                  {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
-                  FULL OVERHAUL (fast)
-                </Button>
-                <Button onClick={() => fullOverhaul(true)} disabled={pushing} className="w-full" variant="default">
-                  {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
-                  PREMIUM AI rewrite
-                </Button>
+                {(() => {
+                  const blocked = ((fixes as any).qualityVerdict === "block") || (((fixes as any).blockers || []).length > 0);
+                  return (
+                    <>
+                      <Button onClick={() => fullOverhaul(false)} disabled={pushing || blocked} className="w-full" variant="destructive">
+                        {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
+                        FULL OVERHAUL (fast)
+                      </Button>
+                      <Button onClick={() => fullOverhaul(true)} disabled={pushing || blocked} className="w-full" variant="default">
+                        {pushing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
+                        PREMIUM AI rewrite
+                      </Button>
+                    </>
+                  );
+                })()}
               </div>
               <p className="text-[11px] text-muted-foreground -mt-1">Premium rewrites body copy with AI for higher quality. Only runs on small posts (≤80KB raw) to stay within memory limits — falls back to fast mode otherwise.</p>
               {overhaulResult && (
