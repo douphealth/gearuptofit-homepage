@@ -166,6 +166,47 @@ function stripOrphanCss(input: string): { html: string; removed: number } {
   return { html, removed };
 }
 
+// WordPress can strip <script type="application/ld+json"> from REST updates
+// while leaving the JSON-LD payload visible in the article body. Remove every
+// structured-data block/fragment from post content; schema must not live inside
+// editable body HTML when the writer cannot use unfiltered_html.
+function stripLeakedStructuredData(input: string): { html: string; removed: number } {
+  if (!input) return { html: input, removed: 0 };
+  let html = input;
+  let removed = 0;
+  const drop = (match: string) => { removed += match.length; return ""; };
+
+  html = html
+    .replace(/<!--\s*gutf:jsonld\s*-->[\s\S]*?<!--\s*\/gutf:jsonld\s*-->/gi, drop)
+    .replace(/<script\b[^>]*application\/ld\+json[^>]*>[\s\S]*?<\/script>/gi, drop)
+    .replace(/<script\b[^>]*>[\s\S]{0,6000}?(?:schema\.org|&quot;@context&quot;|"@context")[\s\S]*?<\/script>/gi, drop);
+
+  // Remove whole paragraph/div/pre/code wrappers whose text is a schema blob.
+  html = html.replace(/<(p|div|pre|code)\b[^>]*>[\s\S]{0,12000}?(?:schema\.org|(?:"|&quot;|&#0?34;)@context(?:"|&quot;|&#0?34;))[\s\S]{0,12000}?<\/\1>/gi, (match) => {
+    const plain = stripTags(match).replace(/&quot;|&#0?34;/gi, '"');
+    if (/@context/i.test(plain) && /schema\.org|@graph|@type|headline|Article|FAQPage/i.test(plain)) return drop(match);
+    return match;
+  });
+
+  // Last-resort visible-text cleanup for malformed/truncated JSON-LD fragments.
+  const schemaStart = /(?:\{|\[)?\s*(?:"|&quot;|&#0?34;)@context(?:"|&quot;|&#0?34;)\s*:\s*(?:"|&quot;|&#0?34;)https?:\/\/schema\.org\/?(?:"|&quot;|&#0?34;)/i;
+  let guard = 0;
+  while (guard++ < 8) {
+    const m = schemaStart.exec(html);
+    if (!m) break;
+    const start = m.index;
+    const tail = html.slice(start);
+    const closeMarker = tail.search(/<!--\s*\/(?:gutf:jsonld|gutf:[a-z-]+)\s*-->|<(?:h1|h2|h3|p|div|ul|ol|table|blockquote)\b/gi);
+    const hardStop = tail.search(/(?:\}\s*\}\s*\]\s*\}|\}\s*\]\s*\})/);
+    const end = hardStop > 0 ? start + hardStop + tail.match(/(?:\}\s*\}\s*\]\s*\}|\}\s*\]\s*\})/)![0].length : start + (closeMarker > 80 ? closeMarker : Math.min(tail.length, 12000));
+    removed += Math.max(0, end - start);
+    html = html.slice(0, start) + html.slice(end);
+  }
+
+  html = html.replace(/<p>\s*<\/p>/gi, "").replace(/<p>\s*(?:&nbsp;|\s)*<\/p>/gi, "");
+  return { html, removed };
+}
+
 function applyVisualFixes(raw: string): { html: string; changes: string[] } {
   const changes: string[] = [];
   let html = raw;
