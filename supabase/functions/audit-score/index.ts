@@ -25,11 +25,35 @@ async function checkAuth(req: Request): Promise<boolean> {
 
 type Sev = "critical" | "high" | "medium" | "polish";
 type Issue = { severity: Sev; code: string; message: string; category?: "seo" | "aeo" | "geo" | "visual" | "content" | "schema" };
+type LiveInspection = {
+  url: string;
+  finalUrl: string;
+  status: number;
+  ok: boolean;
+  html: string;
+  contentHtml: string;
+  text: string;
+  wordCount: number;
+  source: "article" | "main" | "entry-content" | "body" | "none";
+  looks404: boolean;
+  bytes: number;
+};
 
 const HARD = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
 
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return decodeEntities(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+}
+function decodeEntities(text: string): string {
+  return String(text || "")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)));
 }
 function countMatches(s: string, re: RegExp): number {
   return (s.match(re) || []).length;
@@ -57,6 +81,89 @@ async function fetchPostDetails(postId: number) {
     } catch { /* try next */ }
   }
   return null;
+}
+
+function normalizeApexUrl(value?: string | null): string {
+  if (!value) return "";
+  return String(value)
+    .replace(/^https?:\/\/origin\.gearuptofit\.com/i, "https://gearuptofit.com")
+    .replace(/^http:\/\/gearuptofit\.com/i, "https://gearuptofit.com")
+    .replace(/#.*$/, "")
+    .trim();
+}
+
+function stripNonContent(html: string): string {
+  return String(html || "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<svg\b[\s\S]*?<\/svg>/gi, " ")
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, " ")
+    .replace(/<footer\b[\s\S]*?<\/footer>/gi, " ")
+    .replace(/<aside\b[\s\S]*?<\/aside>/gi, " ")
+    .replace(/<form\b[\s\S]*?<\/form>/gi, " ");
+}
+
+function extractLargest(html: string, re: RegExp): string {
+  let best = "";
+  for (const match of html.matchAll(re)) {
+    const block = match[0] || "";
+    if (stripHtml(stripNonContent(block)).split(/\s+/).filter(Boolean).length > stripHtml(stripNonContent(best)).split(/\s+/).filter(Boolean).length) best = block;
+  }
+  return best;
+}
+
+function extractLiveContent(html: string): Pick<LiveInspection, "contentHtml" | "text" | "wordCount" | "source"> {
+  const candidates: Array<{ source: LiveInspection["source"]; html: string }> = [
+    { source: "article", html: extractLargest(html, /<article\b[\s\S]*?<\/article>/gi) },
+    { source: "main", html: extractLargest(html, /<main\b[\s\S]*?<\/main>/gi) },
+    { source: "entry-content", html: extractLargest(html, /<(?:div|section)\b[^>]*class=["'][^"']*(?:entry-content|post-content|wp-block-post-content|gutf-article|td-post-content|single-post-content|article-content)[^"']*["'][^>]*>[\s\S]*?<\/(?:div|section)>/gi) },
+  ];
+  const scored = candidates
+    .map((c) => {
+      const cleaned = stripNonContent(c.html);
+      const text = stripHtml(cleaned);
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
+      return { ...c, html: cleaned, text, wordCount };
+    })
+    .filter((c) => c.wordCount > 0)
+    .sort((a, b) => b.wordCount - a.wordCount);
+  const best = scored[0];
+  if (best && best.wordCount >= 80) return { contentHtml: best.html, text: best.text, wordCount: best.wordCount, source: best.source };
+  const body = (html.match(/<body\b[\s\S]*?<\/body>/i)?.[0] || html);
+  const bodyClean = stripNonContent(body);
+  const bodyText = stripHtml(bodyClean);
+  return {
+    contentHtml: bodyClean,
+    text: bodyText,
+    wordCount: bodyText.split(/\s+/).filter(Boolean).length,
+    source: bodyText ? "body" : "none",
+  };
+}
+
+async function fetchLiveInspection(url: string): Promise<LiveInspection> {
+  const target = normalizeApexUrl(url);
+  const empty: LiveInspection = { url: target, finalUrl: target, status: 0, ok: false, html: "", contentHtml: "", text: "", wordCount: 0, source: "none", looks404: true, bytes: 0 };
+  if (!target || !/^https?:\/\//i.test(target)) return empty;
+  try {
+    const res = await fetch(target, {
+      headers: { "User-Agent": "GearupAudit/5.0 (+live-rendered-scoring)", accept: "text/html,application/xhtml+xml" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(10000),
+    });
+    const raw = await res.text().catch(() => "");
+    const html = raw.length > 500_000 ? raw.slice(0, 500_000) : raw;
+    const extracted = extractLiveContent(html);
+    const looks404 =
+      res.status === 404 ||
+      /\bpage you requested could not be found\b/i.test(html) ||
+      /<title>[^<]*\b(404|not found|page not found)\b[^<]*<\/title>/i.test(html) ||
+      /\bnothing found\b.*\bsearching will help\b/is.test(html);
+    return { url: target, finalUrl: res.url || target, status: res.status, ok: res.ok && !looks404, html, ...extracted, looks404, bytes: raw.length };
+  } catch {
+    return empty;
+  }
 }
 
 /* -------------------------- VISUAL HEURISTICS -------------------------- */
