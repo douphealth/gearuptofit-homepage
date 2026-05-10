@@ -1098,8 +1098,25 @@ function PostDrawer({ post, score, onClose }: { post: Post | null; score?: Score
 
   const fullOverhaul = async (premium = false) => {
     if (!fixes) { toast({ title: "Generate AI fixes first" }); return; }
+
+    // ---- Premium quality gate ----
+    const verdict: string = (fixes as any)?.qualityVerdict || "review";
+    const qScore: number = Number((fixes as any)?.qualityScore ?? 0);
+    const blockers: string[] = Array.isArray((fixes as any)?.blockers) ? (fixes as any).blockers : [];
+    if (verdict === "block" || blockers.length > 0) {
+      toast({
+        title: `Publish blocked — quality gate failed (${qScore}/100)`,
+        description: blockers.slice(0, 3).join(" · ") || "Regenerate fixes and try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (verdict === "review") {
+      if (!confirm(`Quality score is ${qScore}/100 — below the premium publish threshold (85). Recommended: regenerate.\n\nOverride and publish anyway?`)) return;
+    }
+
     const label = premium ? "FULL OVERHAUL (PREMIUM AI REWRITE)" : "FULL OVERHAUL";
-    if (!confirm(`${label} — applies all changes to LIVE post ${post.post_id}:\n\n• Wraps tables/iframes for mobile responsiveness\n• Strips fixed pixel widths\n• Adds lazy-loading to images\n• Injects intro, FAQ section, conclusion (idempotent — safe to re-run)\n• Adds JSON-LD schema\n• Adds responsive CSS guard\n• Updates meta title + description${premium ? "\n• AI-rewrites body copy for higher quality (only on small posts)" : ""}\n\nProceed?`)) return;
+    if (!confirm(`${label} — applies all changes to LIVE post ${post.post_id}:\n\n• Wraps tables/iframes for mobile responsiveness\n• Strips fixed pixel widths\n• Adds lazy-loading to images\n• Injects intro, FAQ section, conclusion (idempotent — safe to re-run)\n• Adds JSON-LD schema\n• Adds responsive CSS guard\n• Updates meta title + description${premium ? "\n• AI-rewrites body copy for higher quality (only on small posts)" : ""}\n\nQuality gate: ${qScore}/100 (${verdict.toUpperCase()})\n\nProceed?`)) return;
     setPushing(true);
     try {
       const r = await callAudit<{ ok: boolean; changes: string[]; message: string; content_source?: string; verification?: any; visual?: any; body_word_count?: number; body_h2_count?: number }>("wp-overhaul", { post_id: post.post_id, fixes: compactFixesForOverhaul(fixes), premium_quality: premium });
