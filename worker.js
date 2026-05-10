@@ -3,6 +3,7 @@ const ORIGIN_HOST = 'origin.gearuptofit.com';
 const ORIGIN_BASE = `https://${ORIGIN_HOST}`;
 const SITEMAP_TTL = 3600;
 const MAX_REST_PAGES = 50;
+const AUTHORITATIVE_POST_SITEMAPS = ['/post-sitemap.xml', '/post-sitemap2.xml'];
 
 const LOVABLE_ROUTES = [
   '/',
@@ -52,6 +53,41 @@ function lastmodFrom(item) {
   const iso = raw.endsWith('Z') ? raw : `${raw.replace('+00:00', '')}Z`;
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+}
+
+async function fetchOriginXml(pathname) {
+  const res = await fetch(`${ORIGIN_BASE}${pathname}`, {
+    headers: { accept: 'application/xml,text/xml', 'user-agent': 'GearUpToFit sitemap worker' },
+    cf: { cacheTtl: SITEMAP_TTL, cacheEverything: true },
+  });
+  if (!res.ok) throw new Error(`Origin sitemap ${pathname} failed: ${res.status}`);
+  return res.text();
+}
+
+function parseUrlsetXml(xml) {
+  const entries = [];
+  const blocks = xml.match(/<url[\s\S]*?<\/url>/gi) || [];
+  for (const block of blocks) {
+    const loc = normalizeApexUrl((block.match(/<loc>\s*([\s\S]*?)\s*<\/loc>/i) || [])[1] || '');
+    if (!loc || !loc.startsWith(`https://${APEX_HOST}/`)) continue;
+    const lastmod = (block.match(/<lastmod>\s*([\s\S]*?)\s*<\/lastmod>/i) || [])[1] || '';
+    entries.push({ loc, lastmod });
+  }
+  return entries;
+}
+
+async function fetchAuthoritativePostSitemapItems() {
+  const seen = new Set();
+  const items = [];
+  for (const path of AUTHORITATIVE_POST_SITEMAPS) {
+    const xml = await fetchOriginXml(path);
+    for (const item of parseUrlsetXml(xml)) {
+      if (seen.has(item.loc)) continue;
+      seen.add(item.loc);
+      items.push(item);
+    }
+  }
+  return items;
 }
 
 async function fetchAllFromRest(type) {
