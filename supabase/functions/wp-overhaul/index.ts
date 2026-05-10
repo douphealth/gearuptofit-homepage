@@ -166,6 +166,47 @@ function stripOrphanCss(input: string): { html: string; removed: number } {
   return { html, removed };
 }
 
+// WordPress can strip <script type="application/ld+json"> from REST updates
+// while leaving the JSON-LD payload visible in the article body. Remove every
+// structured-data block/fragment from post content; schema must not live inside
+// editable body HTML when the writer cannot use unfiltered_html.
+function stripLeakedStructuredData(input: string): { html: string; removed: number } {
+  if (!input) return { html: input, removed: 0 };
+  let html = input;
+  let removed = 0;
+  const drop = (match: string) => { removed += match.length; return ""; };
+
+  html = html
+    .replace(/<!--\s*gutf:jsonld\s*-->[\s\S]*?<!--\s*\/gutf:jsonld\s*-->/gi, drop)
+    .replace(/<script\b[^>]*application\/ld\+json[^>]*>[\s\S]*?<\/script>/gi, drop)
+    .replace(/<script\b[^>]*>[\s\S]{0,6000}?(?:schema\.org|&quot;@context&quot;|"@context")[\s\S]*?<\/script>/gi, drop);
+
+  // Remove whole paragraph/div/pre/code wrappers whose text is a schema blob.
+  html = html.replace(/<(p|div|pre|code)\b[^>]*>[\s\S]{0,12000}?(?:schema\.org|(?:"|&quot;|&#0?34;)@context(?:"|&quot;|&#0?34;))[\s\S]{0,12000}?<\/\1>/gi, (match) => {
+    const plain = stripTags(match).replace(/&quot;|&#0?34;/gi, '"');
+    if (/@context/i.test(plain) && /schema\.org|@graph|@type|headline|Article|FAQPage/i.test(plain)) return drop(match);
+    return match;
+  });
+
+  // Last-resort visible-text cleanup for malformed/truncated JSON-LD fragments.
+  const schemaStart = /(?:\{|\[)?\s*(?:"|&quot;|&#0?34;)@context(?:"|&quot;|&#0?34;)\s*:\s*(?:"|&quot;|&#0?34;)https?:\/\/schema\.org\/?(?:"|&quot;|&#0?34;)/i;
+  let guard = 0;
+  while (guard++ < 8) {
+    const m = schemaStart.exec(html);
+    if (!m) break;
+    const start = m.index;
+    const tail = html.slice(start);
+    const closeMarker = tail.search(/<!--\s*\/(?:gutf:jsonld|gutf:[a-z-]+)\s*-->|<(?:h1|h2|h3|p|div|ul|ol|table|blockquote)\b/gi);
+    const hardStop = tail.search(/(?:\}\s*\}\s*\]\s*\}|\}\s*\]\s*\})/);
+    const end = hardStop > 0 ? start + hardStop + tail.match(/(?:\}\s*\}\s*\]\s*\}|\}\s*\]\s*\})/)![0].length : start + (closeMarker > 80 ? closeMarker : Math.min(tail.length, 12000));
+    removed += Math.max(0, end - start);
+    html = html.slice(0, start) + html.slice(end);
+  }
+
+  html = html.replace(/<p>\s*<\/p>/gi, "").replace(/<p>\s*(?:&nbsp;|\s)*<\/p>/gi, "");
+  return { html, removed };
+}
+
 function applyVisualFixes(raw: string): { html: string; changes: string[] } {
   const changes: string[] = [];
   let html = raw;
@@ -240,10 +281,10 @@ function injectConclusion(html: string, conclusionHtml: string): { html: string;
 }
 
 function injectJsonLd(html: string, jsonLd: any): { html: string; added: boolean } {
-  if (!jsonLd || html.includes("<!--gutf:jsonld-->")) return { html, added: false };
-  const payload = JSON.stringify(jsonLd).replace(/<\/script/gi, "<\\/script");
-  const block = `<!--gutf:jsonld--><script type="application/ld+json">${payload}</script><!--/gutf:jsonld-->`;
-  return { html: `${html}\n${block}`, added: true };
+  // Do not write JSON-LD into WordPress post_content. Application-password
+  // publishing can strip <script> while leaving the raw schema JSON visible to
+  // readers. SEO/schema should be handled by the site layer, not body content.
+  return { html, added: false };
 }
 
 function stripNonContent(html: string): string {
@@ -1149,8 +1190,10 @@ Deno.serve(async (req) => {
     contentSource = hasSlot ? "generated_seed_empty_rest" : "generated_seed_for_empty_template_post";
     await logEvent(postId, `Recovered empty editable content with generated seed (${diag}; live_slot=${hasSlot})`, true);
   }
-  // Aggressively strip orphan CSS leaks (e.g. "Site-wide sidebar hide", widget rules)
-  // BEFORE any transforms — guarantees the visible body never renders raw CSS as text.
+  // Aggressively strip orphan CSS + leaked schema JSON BEFORE any transforms —
+  // guarantees the visible body never renders raw CSS/JSON-LD as text.
+  const schemaClean = stripLeakedStructuredData(raw);
+  if (schemaClean.removed > 0) raw = schemaClean.html;
   const cssClean = stripOrphanCss(raw);
   if (cssClean.removed > 0) raw = cssClean.html;
   const compactedRaw = compactRawHtml(raw);
@@ -1168,10 +1211,10 @@ Deno.serve(async (req) => {
   // actually survives the WordPress REST update (Application Passwords lack unfiltered_html).
   let enriched: Record<string, any> = {
     ...enrichedRaw,
-    introHtml: ksesSafe(enrichedRaw.introHtml || ""),
-    sectionsHtml: ksesSafe(enrichedRaw.sectionsHtml || ""),
-    faqHtml: ksesSafe(enrichedRaw.faqHtml || ""),
-    conclusionHtml: ksesSafe(enrichedRaw.conclusionHtml || ""),
+    introHtml: stripLeakedStructuredData(ksesSafe(enrichedRaw.introHtml || "")).html,
+    sectionsHtml: stripLeakedStructuredData(ksesSafe(enrichedRaw.sectionsHtml || "")).html,
+    faqHtml: stripLeakedStructuredData(ksesSafe(enrichedRaw.faqHtml || "")).html,
+    conclusionHtml: stripLeakedStructuredData(ksesSafe(enrichedRaw.conclusionHtml || "")).html,
   };
   enriched = ensurePublishableFallback(enriched, post, raw);
 
@@ -1242,7 +1285,9 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: false, post_id: postId, changes, message: `Refused final publish: generated body is still too thin (${bodyWords} words · ${bodyH2} H2).`, content_source: contentSource, body_word_count: bodyWords, body_h2_count: bodyH2 }, 200);
   }
 
-  // 4. PUT update — final orphan-CSS sweep on the full document.
+  // 4. PUT update — final orphan-CSS/schema sweep on the full document.
+  const finalSchemaClean = stripLeakedStructuredData(html);
+  if (finalSchemaClean.removed > 0) { html = finalSchemaClean.html; changes.push(`stripped-leaked-schema:${finalSchemaClean.removed}b`); }
   const finalClean = stripOrphanCss(html);
   if (finalClean.removed > 0) { html = finalClean.html; changes.push(`stripped-orphan-css:${finalClean.removed}b`); }
   const runId = crypto.randomUUID();
