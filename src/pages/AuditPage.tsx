@@ -10,6 +10,7 @@ import { toast } from "@/hooks/use-toast";
 import {
   verifyAuditPassword, setAuditPw, getAuditPw, clearAuditPw, callAudit,
 } from "@/lib/auditClient";
+import { LlmSettingsDialog } from "@/components/LlmSettingsDialog";
 
 type Issue = { severity: "critical" | "high" | "polish"; code: string; message: string };
 type ScoreRow = { post_id: number; score: number; issues: Issue[]; metrics: any; scanned_at: string };
