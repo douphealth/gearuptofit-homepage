@@ -9,7 +9,7 @@
 //   - primaryKeyword, secondaryKeywords
 //   - metaTitle, metaDescription
 //
-// Uses google/gemini-2.5-pro for top-tier reasoning. Cached 24h.
+// Uses google/gemini-2.5-flash with a premium-quality system prompt. Cached 24h.
 
 import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
