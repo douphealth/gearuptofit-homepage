@@ -1131,6 +1131,10 @@ Deno.serve(async (req) => {
     contentSource = hasSlot ? "generated_seed_empty_rest" : "generated_seed_for_empty_template_post";
     await logEvent(postId, `Recovered empty editable content with generated seed (${diag}; live_slot=${hasSlot})`, true);
   }
+  // Aggressively strip orphan CSS leaks (e.g. "Site-wide sidebar hide", widget rules)
+  // BEFORE any transforms — guarantees the visible body never renders raw CSS as text.
+  const cssClean = stripOrphanCss(raw);
+  if (cssClean.removed > 0) raw = cssClean.html;
   const compactedRaw = compactRawHtml(raw);
   if (compactedRaw.truncated) {
     raw = compactedRaw.raw;
