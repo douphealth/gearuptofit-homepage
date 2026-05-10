@@ -641,6 +641,7 @@ function buildSeedContent(fixes: Record<string, any>): string {
   // Note: deliberately NOT injecting an "Recommended Content Structure" outline list.
   // That placeholder rendered as visible bullet points and made the post look empty.
   // Real <section><h2> body content must come from generatePremiumContent.sectionsHtml.
+  if (typeof fixes.visualModulesHtml === "string" && fixes.visualModulesHtml.trim()) blocks.push(`<!--gutf:visual-->${fixes.visualModulesHtml.trim()}<!--/gutf:visual-->`);
   if (typeof fixes.faqHtml === "string" && fixes.faqHtml.trim()) blocks.push(`<!--gutf:faq-->${fixes.faqHtml.trim()}<!--/gutf:faq-->`);
   if (typeof fixes.conclusionHtml === "string" && fixes.conclusionHtml.trim()) blocks.push(`<!--gutf:bottom-line-->${fixes.conclusionHtml.trim()}<!--/gutf:bottom-line-->`);
   return blocks.length ? `<div class="gutf-article gutf-generated-overhaul">\n${blocks.join("\n")}\n</div>` : "";
