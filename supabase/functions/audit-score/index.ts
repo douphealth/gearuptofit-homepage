@@ -577,7 +577,9 @@ async function probeLiveUrl(url: string): Promise<{ issue: Issue | null; forcedS
       redirect: "follow",
     });
     const status = res.status;
-    const html = await res.text().catch(() => "");
+    const rawHtml = await res.text().catch(() => "");
+    // Cap to ~250KB to avoid CPU blow-up on huge pages
+    const html = rawHtml.length > 250_000 ? rawHtml.slice(0, 250_000) : rawHtml;
     const bodyText = stripHtml(
       (html.match(/<main[\s\S]*?<\/main>/i)?.[0] || html.match(/<article[\s\S]*?<\/article>/i)?.[0] || html)
         .replace(/<script[\s\S]*?<\/script>/gi, "")
