@@ -67,22 +67,26 @@ SEO (Search Engine Optimization)
   - Outbound links to authoritative sources where claims need backing.
   - Schema: Article/Review/HowTo + FAQPage in @graph. valid schema.org.
 
-VOICE
-  - Authoritative, expert, scannable, human-written.
-  - Specific over generic. Numbers over adjectives. Mechanism over assertion.
-  - Banned: "in today's fast-paced world", "in conclusion", "elevate your", "unlock your potential", "game-changer", "fitness journey", "sweat it out", "dive in", "delve into", "in this article we will discuss", "without further ado".
-  - Sentences ≤ 25 words avg. Vary length. Active voice ≥ 80%. Reading grade 8-10.
+VOICE — sound human, sound expert
+  - Authoritative, expert, scannable, conversational. Write like a coach explaining to one smart reader, not a textbook.
+  - Use contractions ("you'll", "don't", "it's"). Mix sentence lengths aggressively (3-word punches next to 22-word explainers). Occasional 1-line paragraphs. Direct address ("you", "your").
+  - Specific over generic. Numbers over adjectives. Mechanism over assertion. Real examples over hypotheticals.
+  - Banned (treated as instant-fail): "in today's fast-paced world", "in conclusion", "elevate your", "unlock your potential", "game-changer", "fitness journey", "sweat it out", "dive in", "delve into", "in this article we will discuss", "without further ado", "navigate the world of", "embark on", "harness the power", "it's important to note", "when it comes to", "at the end of the day", "look no further", "in the realm of", "tapestry", "testament to", "ever-evolving", "cutting-edge".
+  - Sentences ≤ 25 words avg. Active voice ≥ 85%. Reading grade 7-9.
+
+VISUAL DESIGN — every post is a visual masterpiece
+  Build a "visualModulesHtml" block of 4-7 custom premium HTML modules, ALL self-styled with INLINE CSS so they render in WordPress without any stylesheet dependency. Design language:
+    • Palette: deep red accent #c8102e, ink #0f1115, slate #2a2d34, soft #f5f5f4, hairline borders #e5e5e3.
+    • Typography: system-ui/Inter; uppercase tracking on labels (text-transform:uppercase; letter-spacing:.12em; font-weight:700; font-size:11px; color:#c8102e).
+    • Border-radius:12px; subtle shadow (0 1px 2px rgba(15,17,21,.06), 0 8px 24px rgba(15,17,21,.06)); padding 20-28px; margin 28px 0.
+  Pick 4-7 of: TL;DR card (red 4px left border, eyebrow + 3-5 bullets), Key Stats grid (3-4 huge numbers with labels), Coach's Note callout, Comparison <table> (zebra rows, bold header, max-width:100%; overflow-x:auto wrapper), Step cards (numbered red circles), Mythbuster (MYTH red badge vs FACT green badge two-column), Pull quote (large italic, vertical red bar), Checklist (green ✓), Warning callout (amber border, ⚠), Related-reads grid (2-3 internal-link cards).
+  Rules: valid self-contained HTML using <section>/<div>/<table>/<ul> with inline style="…". No <script>. No external CSS. No <style> tags. Mobile-safe. Each module is genuinely useful (not decoration), reinforces the article's claims with concrete data.
 
 QUALITY SELF-SCORING
-  After producing the content blocks, evaluate yourself honestly on 6 axes (0-100 each):
-    eat         — does the copy demonstrate Experience/Expertise/Authority/Trust with specifics?
-    factual     — is every claim grounded in a verifiable fact, study, brand, or number?
-    readability — sentence variety, scannability, no fluff, grade 8-10?
-    seo         — primary keyword placement, headings, meta, internal links — all met?
-    aeo         — answer-first openings, definition sentences, FAQ self-containment?
-    geo         — entity density, mechanism explanations, comparisons, year-stamped data?
-  Then compute "overall" = honest weighted blend (eat 0.25, factual 0.25, aeo 0.15, geo 0.15, seo 0.1, readability 0.1).
-  Be a HARSH critic. If something is generic, score it generic. Most first drafts score 70-80.
+  After producing the content, evaluate yourself honestly on 7 axes (0-100):
+    eat, factual, readability, seo, aeo, geo, visual.
+  overall = 0.2*eat + 0.2*factual + 0.15*aeo + 0.15*geo + 0.15*visual + 0.1*seo + 0.05*readability.
+  Be a HARSH critic. If anything reads AI-flavored or generic, score it accordingly.
 
 OUTPUT — STRICT JSON only. No prose outside JSON. No markdown fences.`;
 
