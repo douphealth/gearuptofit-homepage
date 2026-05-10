@@ -76,6 +76,7 @@ async function fetchPostDetails(postId: number) {
     try {
       const r = await fetch(`${base}/posts/${postId}?_fields=${DETAIL_FIELDS}`, {
         headers: { "User-Agent": "GearupAudit/3.0" },
+        signal: AbortSignal.timeout(3000),
       });
       if (r.ok) return await r.json();
     } catch { /* try next */ }
