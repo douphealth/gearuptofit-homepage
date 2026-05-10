@@ -300,9 +300,10 @@ Return JSON with EXACTLY this shape (all keys required, no extras):
   "metaDescription": "140-160 chars: contains primary kw + concrete benefit + soft CTA",
   "introHtml": "<p>120-180 words. Sentence 1 directly answers the title (≤25 words). Primary kw in first 100 words. Include one specific stat/study/brand. Use <strong> only for the primary entity. End with a sentence that promises what the article delivers.</p>",
   "h2Outline": ["5-8 H2 headings — entity-rich, intent-matching, no duplicates"],
-  "faqHtml": "<section class=\\"gutf-faq\\" aria-labelledby=\\"faq-heading\\"><h2 id=\\"faq-heading\\">Frequently Asked Questions</h2><div class=\\"gutf-faq-item\\"><h3>Question?</h3><p>40-90 word answer with at least one specific number, brand, or study reference.</p></div>… (5-8 items total, each fully self-contained)</section>",
+  "faqHtml": "<section class=\\"gutf-faq\\" aria-labelledby=\\"faq-heading\\" style=\\"margin:32px 0;\\"><h2 id=\\"faq-heading\\">Frequently Asked Questions</h2><div class=\\"gutf-faq-item\\" style=\\"border:1px solid #e5e5e3;border-radius:12px;padding:20px;margin:12px 0;background:#fff;\\"><h3 style=\\"margin:0 0 8px;font-size:18px;\\">Question?</h3><p style=\\"margin:0;color:#2a2d34;\\">40-90 word answer with at least one specific number, brand, or study reference.</p></div>… (5-8 items, each fully self-contained)</section>",
   "faq": [{"q":"...","a":"40-90 words, self-contained, ≥1 specific fact"}],
-  "conclusionHtml": "<section class=\\"gutf-bottom-line\\"><h2>Bottom Line</h2><p>80-140 words: restate the answer in one sentence, give the single most important takeaway with a number, end with a concrete next step (e.g., 'try X for 4 weeks at Y dose').</p></section>",
+  "conclusionHtml": "<section class=\\"gutf-bottom-line\\" style=\\"margin:32px 0;padding:24px 28px;border-left:4px solid #c8102e;background:#f5f5f4;border-radius:8px;\\"><div style=\\"text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:700;color:#c8102e;margin-bottom:8px;\\">Bottom Line</div><h2 style=\\"margin:0 0 8px;\\">…</h2><p style=\\"margin:0;\\">80-140 words: restate the answer in one sentence, give the single most important takeaway with a number, end with a concrete next step (e.g., 'try X for 4 weeks at Y dose').</p></section>",
+  "visualModulesHtml": "<!-- 4-7 PREMIUM MAGAZINE MODULES, all inline-styled, WP-safe, mobile-friendly. Pick the modules best suited to the topic from: TL;DR card, Key Stats grid, Coach's Note callout, Comparison table, Step cards, Mythbuster, Pull quote, Checklist, Warning callout, Related-reads grid. Example shape: <section style=\\"margin:28px 0;padding:24px;border-radius:12px;border:1px solid #e5e5e3;background:#fff;box-shadow:0 1px 2px rgba(15,17,21,.06),0 8px 24px rgba(15,17,21,.06);\\"><div style=\\"text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:700;color:#c8102e;margin-bottom:10px;\\">TL;DR</div><ul style=\\"margin:0;padding-left:18px;color:#2a2d34;line-height:1.55;\\"><li>…</li></ul></section>. NO <script>. NO <style> tags. NO external CSS. ALL styling INLINE. Each module must carry real, specific content (numbers, brand names, studies) — never decorative filler.",
   "jsonLd": {
     "@context": "https://schema.org",
     "@graph": [
@@ -319,16 +320,18 @@ Return JSON with EXACTLY this shape (all keys required, no extras):
     "trust": "transparency cues (dates, dosages, caveats)"
   },
   "qualitySelfScore": {
-    "eat": 0, "factual": 0, "readability": 0, "seo": 0, "aeo": 0, "geo": 0, "overall": 0,
+    "eat": 0, "factual": 0, "readability": 0, "seo": 0, "aeo": 0, "geo": 0, "visual": 0, "overall": 0,
     "notes": "1-2 sentence honest self-critique highlighting weakest dimension"
   }
 }
 
 CRITICAL:
-  • faqHtml and conclusionHtml must be valid HTML, ready to drop into the post.
+  • faqHtml, conclusionHtml, and visualModulesHtml must be valid HTML, ready to drop into the post.
+  • visualModulesHtml MUST contain 4-7 distinct <section> modules, each with inline styles, each carrying real content.
   • jsonLd must be a real object (not a string).
   • qualitySelfScore must be a brutally honest evaluation. If the draft has any generic prose, score it accordingly.
-  • Avoid every banned phrase listed in your instructions.`;
+  • Avoid every banned phrase listed in your instructions.
+  • Write like a human coach, not an AI summarizer. Use contractions. Vary sentence length. Direct address.`;
 
   // ---------- BYOK provider routing ----------
   // reqBody._llm: { provider, apiKey, model } — falls back to Lovable AI.
