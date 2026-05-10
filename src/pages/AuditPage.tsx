@@ -12,7 +12,7 @@ import {
 } from "@/lib/auditClient";
 import { LlmSettingsDialog } from "@/components/LlmSettingsDialog";
 
-type Issue = { severity: "critical" | "high" | "polish"; code: string; message: string };
+type Issue = { severity: "critical" | "high" | "medium" | "polish"; code: string; message: string; category?: string };
 type ScoreRow = { post_id: number; score: number; issues: Issue[]; metrics: any; scanned_at: string };
 type Post = { post_id: number; slug: string; title: string; link: string; modified_at: string };
 type ImportPage = { page: number; status: string; retry_count: number; imported_count: number; post_ids?: number[]; error?: string | null };
@@ -294,6 +294,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                   <td className="p-3" dangerouslySetInnerHTML={{ __html: post.title }} />
                   <td className="p-3 hidden md:table-cell">
                     <div className="flex gap-1 flex-wrap">
+                      {!score && <Badge variant="destructive">not-scored</Badge>}
                       {(score?.issues || []).slice(0, 3).map((i, idx) => (
                         <Badge key={idx} variant={sevColor(i.severity) as any}>{i.code}</Badge>
                       ))}
