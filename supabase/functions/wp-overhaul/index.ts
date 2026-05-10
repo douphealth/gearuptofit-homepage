@@ -1224,7 +1224,9 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: false, post_id: postId, changes, message: `Refused final publish: generated body is still too thin (${bodyWords} words · ${bodyH2} H2).`, content_source: contentSource, body_word_count: bodyWords, body_h2_count: bodyH2 }, 200);
   }
 
-  // 4. PUT update
+  // 4. PUT update — final orphan-CSS sweep on the full document.
+  const finalClean = stripOrphanCss(html);
+  if (finalClean.removed > 0) { html = finalClean.html; changes.push(`stripped-orphan-css:${finalClean.removed}b`); }
   const runId = crypto.randomUUID();
   const marker = runMarker(runId);
   html = `${html}\n${runMarkerHtml(runId)}`;
