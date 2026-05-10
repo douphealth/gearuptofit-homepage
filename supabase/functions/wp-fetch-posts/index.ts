@@ -1,8 +1,15 @@
 import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
 
-const WP_BASE = "https://gearuptofit.com/wp-json/wp/v2";
-const PER_PAGE = 100;
+const SITE_BASE = "https://gearuptofit.com";
+const ORIGIN_SITE_BASE = "https://origin.gearuptofit.com";
+const WP_BASE = `${SITE_BASE}/wp-json/wp/v2`;
+const ORIGIN_WP_BASE = `${ORIGIN_SITE_BASE}/wp-json/wp/v2`;
+const AUTHORITATIVE_POST_SITEMAPS = [
+  `${SITE_BASE}/post-sitemap.xml`,
+  `${SITE_BASE}/post-sitemap2.xml`,
+];
+const PER_PAGE = 50;
 const FIELDS = "id,slug,link,title,modified_gmt,date_gmt";
 const MAX_MISSING = 500;
 
@@ -15,6 +22,8 @@ type WpPost = {
   date_gmt?: string;
 };
 
+type SitemapEntry = { loc: string; lastmod?: string };
+
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -26,16 +35,70 @@ function postTitle(title: WpPost["title"]) {
   return typeof title === "object" ? title?.rendered || "" : String(title ?? "");
 }
 
-async function getWpCount() {
-  const probe = await fetch(`${WP_BASE}/posts?per_page=1&page=1&status=publish&_fields=id`, {
-    headers: { "User-Agent": "GearupAudit/1.0" },
-  });
-  if (!probe.ok) {
-    await probe.text();
-    throw new Error(`WP count failed: ${probe.status}`);
+function normalizeApexUrl(value?: string | null): string {
+  if (!value) return "";
+  return String(value)
+    .replace(/^https?:\/\/origin\.gearuptofit\.com/i, SITE_BASE)
+    .replace(/^http:\/\/gearuptofit\.com/i, SITE_BASE)
+    .replace(/#.*$/, "")
+    .trim();
+}
+
+function slugFromUrl(value: string): string {
+  try {
+    const path = new URL(value).pathname.replace(/\/+$/, "");
+    return decodeURIComponent(path.split("/").filter(Boolean).pop() || "");
+  } catch {
+    return "";
   }
-  await probe.text();
-  const total = parseInt(probe.headers.get("x-wp-total") || "0", 10);
+}
+
+async function fetchSitemapXml(url: string): Promise<string> {
+  const headers = { "User-Agent": "GearupAudit/4.0 (+authoritative-sitemap)", accept: "application/xml,text/xml" };
+  for (const target of [url, url.replace(SITE_BASE, ORIGIN_SITE_BASE)]) {
+    try {
+      const res = await fetch(target, { headers });
+      if (res.ok) return await res.text();
+    } catch { /* try next */ }
+  }
+  throw new Error(`Sitemap fetch failed: ${url}`);
+}
+
+function parseSitemapEntries(xml: string): SitemapEntry[] {
+  const entries: SitemapEntry[] = [];
+  const urlBlocks = xml.match(/<url[\s\S]*?<\/url>/gi) || [];
+  for (const block of urlBlocks) {
+    const loc = normalizeApexUrl((block.match(/<loc>\s*([\s\S]*?)\s*<\/loc>/i) || [])[1]);
+    if (!loc || !loc.startsWith(`${SITE_BASE}/`)) continue;
+    const lastmod = (block.match(/<lastmod>\s*([\s\S]*?)\s*<\/lastmod>/i) || [])[1]?.trim();
+    entries.push({ loc, lastmod });
+  }
+  if (!entries.length) {
+    for (const [, locRaw] of xml.matchAll(/<loc>\s*([\s\S]*?)\s*<\/loc>/gi)) {
+      const loc = normalizeApexUrl(locRaw);
+      if (loc && loc.startsWith(`${SITE_BASE}/`)) entries.push({ loc });
+    }
+  }
+  return entries;
+}
+
+async function getAuthoritativeSitemapEntries(): Promise<SitemapEntry[]> {
+  const seen = new Set<string>();
+  const all: SitemapEntry[] = [];
+  for (const sitemap of AUTHORITATIVE_POST_SITEMAPS) {
+    const xml = await fetchSitemapXml(sitemap);
+    for (const entry of parseSitemapEntries(xml)) {
+      if (seen.has(entry.loc)) continue;
+      seen.add(entry.loc);
+      all.push(entry);
+    }
+  }
+  return all;
+}
+
+async function getWpCount(entries?: SitemapEntry[]) {
+  const sourceEntries = entries || await getAuthoritativeSitemapEntries();
+  const total = sourceEntries.length;
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
   return { total, totalPages };
 }
