@@ -148,7 +148,8 @@ async function getDiagnostics(supabase: ReturnType<typeof createClient>, runId?:
     : null;
   const { data: pages } = pagesQuery ? await pagesQuery : { data: [] };
 
-  const { total, totalPages } = await getWpCount();
+  const sitemapEntries = await getAuthoritativeSitemapEntries();
+  const { total, totalPages } = await getWpCount(sitemapEntries);
   const cached = await getCachedPosts(supabase);
   const cachedIds = new Set(cached.map((p: any) => Number(p.post_id)));
   const expectedRefs = (pages || []).flatMap((p: any) => Array.isArray(p.post_refs) ? p.post_refs : []);
@@ -164,6 +165,8 @@ async function getDiagnostics(supabase: ReturnType<typeof createClient>, runId?:
 
   return {
     authoritative: {
+      source: "post-sitemap.xml + post-sitemap2.xml",
+      sitemapUrls: AUTHORITATIVE_POST_SITEMAPS,
       totalPublished: total,
       totalPages,
       perPage: PER_PAGE,
@@ -195,6 +198,8 @@ async function createRun(supabase: ReturnType<typeof createClient>) {
     .single();
   if (error) throw error;
 
+  await supabase.from("wp_posts_cache").delete().gte("post_id", 0);
+
   const pageRows = Array.from({ length: totalPages }, (_, i) => ({
     run_id: run.id,
     page: i + 1,
@@ -208,6 +213,21 @@ async function createRun(supabase: ReturnType<typeof createClient>) {
   return run;
 }
 
+async function fetchWpPostBySlug(slug: string): Promise<WpPost | null> {
+  if (!slug) return null;
+  for (const base of [WP_BASE, ORIGIN_WP_BASE]) {
+    try {
+      const r = await fetch(`${base}/posts?slug=${encodeURIComponent(slug)}&status=publish&_fields=${FIELDS}`, {
+        headers: { "User-Agent": "GearupAudit/4.0" },
+      });
+      if (!r.ok) continue;
+      const data = await r.json().catch(() => []);
+      if (Array.isArray(data) && data[0]?.id) return data[0] as WpPost;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
 async function fetchPage(supabase: ReturnType<typeof createClient>, runId: string, page: number) {
   const now = new Date().toISOString();
   await supabase
@@ -217,30 +237,31 @@ async function fetchPage(supabase: ReturnType<typeof createClient>, runId: strin
     .eq("page", page);
 
   try {
-    const r = await fetch(`${WP_BASE}/posts?per_page=${PER_PAGE}&page=${page}&status=publish&_fields=${FIELDS}`, {
-      headers: { "User-Agent": "GearupAudit/1.0" },
-    });
-    if (!r.ok) {
-      const text = await r.text();
-      throw new Error(`WP fetch failed ${r.status}: ${text.slice(0, 160)}`);
+    const entries = await getAuthoritativeSitemapEntries();
+    const batch = entries.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+    const posts: Array<WpPost & { sitemap_loc?: string; sitemap_lastmod?: string }> = [];
+    const unresolved: SitemapEntry[] = [];
+    for (const entry of batch) {
+      const post = await fetchWpPostBySlug(slugFromUrl(entry.loc));
+      if (post) posts.push({ ...post, sitemap_loc: entry.loc, sitemap_lastmod: entry.lastmod });
+      else unresolved.push(entry);
     }
-
-    const batch = await r.json();
-    const posts: WpPost[] = Array.isArray(batch) ? batch : [];
     const fetchedAt = new Date().toISOString();
     const rows = posts.map((p) => ({
       post_id: p.id,
       slug: p.slug,
       title: postTitle(p.title),
-      link: p.link,
-      modified_at: p.modified_gmt ? new Date(`${p.modified_gmt}Z`).toISOString() : null,
+      link: normalizeApexUrl(p.link || p.sitemap_loc),
+      modified_at: p.modified_gmt ? new Date(`${p.modified_gmt}Z`).toISOString() : (p.sitemap_lastmod ? new Date(p.sitemap_lastmod).toISOString() : null),
       data: {
         id: p.id,
         slug: p.slug,
-        link: p.link,
+        link: normalizeApexUrl(p.link || p.sitemap_loc),
         title: p.title,
         modified_gmt: p.modified_gmt,
         date_gmt: p.date_gmt,
+        sitemap_loc: p.sitemap_loc,
+        sitemap_lastmod: p.sitemap_lastmod,
       },
       fetched_at: fetchedAt,
     }));
@@ -250,15 +271,15 @@ async function fetchPage(supabase: ReturnType<typeof createClient>, runId: strin
       if (error) throw error;
     }
 
-    const postRefs = posts.map((p) => ({ id: p.id, slug: p.slug || "", title: postTitle(p.title) }));
+    const postRefs = posts.map((p) => ({ id: p.id, slug: p.slug || "", title: postTitle(p.title), loc: p.sitemap_loc }));
     await supabase
       .from("wp_import_pages")
       .update({
         status: "success",
         imported_count: rows.length,
         post_ids: posts.map((p) => p.id),
-        post_refs: postRefs,
-        error: null,
+        post_refs: [...postRefs, ...unresolved.map((entry) => ({ id: 0, slug: slugFromUrl(entry.loc), title: "Unresolved sitemap URL", loc: entry.loc }))],
+        error: unresolved.length ? `Skipped ${unresolved.length} sitemap URL(s) that are not published posts` : null,
         fetched_at: fetchedAt,
         updated_at: fetchedAt,
       })
