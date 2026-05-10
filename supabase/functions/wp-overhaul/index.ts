@@ -1190,8 +1190,10 @@ Deno.serve(async (req) => {
     contentSource = hasSlot ? "generated_seed_empty_rest" : "generated_seed_for_empty_template_post";
     await logEvent(postId, `Recovered empty editable content with generated seed (${diag}; live_slot=${hasSlot})`, true);
   }
-  // Aggressively strip orphan CSS leaks (e.g. "Site-wide sidebar hide", widget rules)
-  // BEFORE any transforms — guarantees the visible body never renders raw CSS as text.
+  // Aggressively strip orphan CSS + leaked schema JSON BEFORE any transforms —
+  // guarantees the visible body never renders raw CSS/JSON-LD as text.
+  const schemaClean = stripLeakedStructuredData(raw);
+  if (schemaClean.removed > 0) raw = schemaClean.html;
   const cssClean = stripOrphanCss(raw);
   if (cssClean.removed > 0) raw = cssClean.html;
   const compactedRaw = compactRawHtml(raw);
@@ -1209,10 +1211,10 @@ Deno.serve(async (req) => {
   // actually survives the WordPress REST update (Application Passwords lack unfiltered_html).
   let enriched: Record<string, any> = {
     ...enrichedRaw,
-    introHtml: ksesSafe(enrichedRaw.introHtml || ""),
-    sectionsHtml: ksesSafe(enrichedRaw.sectionsHtml || ""),
-    faqHtml: ksesSafe(enrichedRaw.faqHtml || ""),
-    conclusionHtml: ksesSafe(enrichedRaw.conclusionHtml || ""),
+    introHtml: stripLeakedStructuredData(ksesSafe(enrichedRaw.introHtml || "")).html,
+    sectionsHtml: stripLeakedStructuredData(ksesSafe(enrichedRaw.sectionsHtml || "")).html,
+    faqHtml: stripLeakedStructuredData(ksesSafe(enrichedRaw.faqHtml || "")).html,
+    conclusionHtml: stripLeakedStructuredData(ksesSafe(enrichedRaw.conclusionHtml || "")).html,
   };
   enriched = ensurePublishableFallback(enriched, post, raw);
 
