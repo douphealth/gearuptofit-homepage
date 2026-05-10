@@ -218,7 +218,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           <h1 className="text-2xl md:text-3xl font-bold">SEO Audit · gearuptofit.com</h1>
           <p className="text-sm text-muted-foreground">Read-only by default. Drafts only on push.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <LlmSettingsDialog />
           <Button variant="outline" size="sm" onClick={() => load(true)} disabled={loading}>
             <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} /> {progress || "Refresh WP"}
           </Button>
