@@ -6,7 +6,7 @@
 // Modes:
 //   { mode: "list", post_ids?: number[] }   → return cached scores
 //   { post_ids: number[] }                   → score N posts (sequential, max 8)
-//   { mode: "scan_all", offset?, limit? }    → score chunk of cached posts (max 20 in parallel)
+//   { mode: "scan_all", offset?, limit? }    → score a tiny sequential chunk to protect edge CPU
 
 import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
@@ -526,7 +526,7 @@ function scorePost(post: any): { score: number; issues: Issue[]; metrics: any } 
 
   // Images & links
   const imgs = html.match(/<img[^>]+>/gi) || [];
-  const missingAlt = imgs.filter((i) => !/\salt=["'][^"']+["']/i.test(i)).length;
+  const missingAlt = imgs.filter((i: string) => !/\salt=["'][^"']+["']/i.test(i)).length;
   if (missingAlt > 0) issues.push({ severity: "high", category: "seo", code: "img-alt", message: `${missingAlt} images missing alt text` });
 
   const internal = countMatches(html, /href=["']https?:\/\/(?:www\.|origin\.)?gearuptofit\.com/gi);
@@ -573,8 +573,9 @@ async function probeLiveUrl(url: string): Promise<{ issue: Issue | null; forcedS
   if (!url || !/^https?:\/\//i.test(url)) return { issue: null, forcedScore: null };
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": "GearupAudit/3.0 (+live-probe)", accept: "text/html" },
+      headers: { "User-Agent": "GearupAudit/4.0 (+live-probe)", accept: "text/html", range: "bytes=0-180000" },
       redirect: "follow",
+      signal: AbortSignal.timeout(8000),
     });
     const status = res.status;
     const rawHtml = await res.text().catch(() => "");
@@ -676,7 +677,7 @@ Deno.serve(async (req) => {
   // ── SCAN_ALL chunk (parallel) ────────────────────────────────────────────
   if (body?.mode === "scan_all") {
     const offset = Math.max(0, Number(body.offset) || 0);
-    const limit = Math.max(1, Math.min(8, Number(body.limit) || 5));
+    const limit = Math.max(1, Math.min(2, Number(body.limit) || 2));
     const { data: posts, error } = await supabase
       .from("wp_posts_cache")
       .select("post_id, slug, title, link, modified_at, data")

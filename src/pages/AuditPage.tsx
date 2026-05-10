@@ -18,7 +18,7 @@ type Post = { post_id: number; slug: string; title: string; link: string; modifi
 type ImportPage = { page: number; status: string; retry_count: number; imported_count: number; post_ids?: number[]; error?: string | null };
 type MissingPost = { id: number; slug: string; title?: string };
 type Diagnostics = {
-  authoritative?: { totalPublished: number; totalPages: number; perPage: number; cachedCount: number; difference: number; complete: boolean };
+  authoritative?: { source?: string; sitemapUrls?: string[]; totalPublished: number; totalPages: number; perPage: number; cachedCount: number; difference: number; complete: boolean };
   run?: { id: string; status: string; expected_total: number; expected_pages: number; imported_total: number; first_missing_page?: number | null; updated_at?: string } | null;
   pages?: ImportPage[];
   firstMissingPage?: number | null;
@@ -144,8 +144,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     setLoading(false);
   };
 
-  // Parallel scan: 20 concurrent workers, scan in chunks of 10 per call.
-  // For 200 posts at ~1.5s/post → ~15-30s total.
+  // Conservative scanner: live URL validation is intentionally slow to avoid edge resource limits.
   const runScan = async () => {
     if (!posts.length) {
       toast({ title: "No cached posts", description: "Run Refresh WP first." });
@@ -155,8 +154,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     try {
       const total = posts.length;
       let scanned = 0;
-      const CHUNK = 10;       // posts per edge call
-      const CONCURRENCY = 4;  // parallel edge calls (40 posts in flight)
+      const CHUNK = 2;
+      const CONCURRENCY = 1;
       const offsets: number[] = [];
       for (let o = 0; o < total; o += CHUNK) offsets.push(o);
 
@@ -999,7 +998,10 @@ function DiagnosticPanel({ diagnostics, loading, onRetry }: { diagnostics: Diagn
     <Card className="mb-6">
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle className="text-base">WordPress Import Diagnostics</CardTitle>
+          <div>
+            <CardTitle className="text-base">WordPress Import Diagnostics</CardTitle>
+            <p className="text-xs text-muted-foreground">Source: {a?.source || "authoritative WordPress post sitemaps"}</p>
+          </div>
           <Button size="sm" variant="outline" onClick={onRetry} disabled={loading || !diagnostics?.run}>
             <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} /> Retry missing pages
           </Button>
