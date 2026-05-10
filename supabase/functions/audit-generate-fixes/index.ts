@@ -118,7 +118,12 @@ function hasKeyword(text = "", kw = "") {
 }
 
 function bannedPhraseHit(s = "") {
-  const banned = ["in today's fast-paced","in conclusion","elevate your","unlock your potential","game-changer","fitness journey","without further ado","dive in","delve into"];
+  const banned = [
+    "in today's fast-paced","in conclusion","elevate your","unlock your potential","game-changer","fitness journey",
+    "without further ado","dive in","delve into","navigate the world of","embark on","harness the power",
+    "it's important to note","when it comes to","at the end of the day","look no further","in the realm of",
+    "tapestry","testament to","ever-evolving","cutting-edge","sweat it out","in this article we will",
+  ];
   const lower = s.toLowerCase();
   return banned.find((b) => lower.includes(b));
 }
