@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { llmBody } from "@/lib/llmSettings";
 
 const KEY = "audit_pw";
 
