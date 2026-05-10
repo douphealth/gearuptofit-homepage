@@ -281,10 +281,10 @@ function injectConclusion(html: string, conclusionHtml: string): { html: string;
 }
 
 function injectJsonLd(html: string, jsonLd: any): { html: string; added: boolean } {
-  if (!jsonLd || html.includes("<!--gutf:jsonld-->")) return { html, added: false };
-  const payload = JSON.stringify(jsonLd).replace(/<\/script/gi, "<\\/script");
-  const block = `<!--gutf:jsonld--><script type="application/ld+json">${payload}</script><!--/gutf:jsonld-->`;
-  return { html: `${html}\n${block}`, added: true };
+  // Do not write JSON-LD into WordPress post_content. Application-password
+  // publishing can strip <script> while leaving the raw schema JSON visible to
+  // readers. SEO/schema should be handled by the site layer, not body content.
+  return { html, added: false };
 }
 
 function stripNonContent(html: string): string {
