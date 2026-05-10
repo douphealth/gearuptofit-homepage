@@ -622,18 +622,32 @@ function detectSchemaIssues(html: string, yoast: any): Issue[] {
   return issues;
 }
 
-function scorePost(post: any): { score: number; issues: Issue[]; metrics: any } {
+function scorePost(post: any, live?: LiveInspection | null): { score: number; issues: Issue[]; metrics: any } {
   const data = post.data || {};
   const title = stripHtml(data.title?.rendered || post.title || "");
-  const html = data.content?.rendered || "";
+  const restHtml = data.content?.rendered || "";
+  const html = live?.contentHtml || restHtml;
+  const fullHtml = live?.html || restHtml;
   const excerpt = stripHtml(data.excerpt?.rendered || "");
   const yoast = data.yoast_head_json || {};
   const yoastTitle = yoast.title || "";
   const yoastDesc = yoast.description || "";
-  const text = stripHtml(html);
-  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const text = live?.text || stripHtml(html);
+  const wordCount = live?.wordCount ?? text.split(/\s+/).filter(Boolean).length;
 
   const issues: Issue[] = [];
+
+  if (!live) {
+    issues.push({ severity: "high", category: "content", code: "live-not-inspected", message: "Score used REST content only because live HTML inspection was unavailable" });
+  } else if (!live.ok || live.looks404) {
+    issues.push({ severity: "critical", category: "content", code: "live-invalid", message: `Live URL failed validation (HTTP ${live.status || "0"}) — score forced very low` });
+  } else {
+    const restWords = stripHtml(restHtml).split(/\s+/).filter(Boolean).length;
+    const delta = Math.abs(restWords - wordCount);
+    if (restWords > 0 && delta > Math.max(250, restWords * 0.35)) {
+      issues.push({ severity: "high", category: "content", code: "rest-live-mismatch", message: `REST body (${restWords} words) differs from live rendered article (${wordCount} words); scoring uses live HTML` });
+    }
+  }
 
   // Title
   const tLen = (yoastTitle || title).length;
@@ -674,23 +688,29 @@ function scorePost(post: any): { score: number; issues: Issue[]; metrics: any } 
   if (external === 0 && wordCount > 800) issues.push({ severity: "polish", category: "seo", code: "no-citations", message: "No outbound citations (E-E-A-T)" });
 
   // Push composed checks
-  issues.push(...detectStructureIssues(html, text, wordCount));
+  issues.push(...detectStructureIssues(html, text, wordCount, fullHtml));
+  issues.push(...detectContentIntegrityIssues(html, text, live));
   issues.push(...detectVisualIssues(html));
-  issues.push(...detectSchemaIssues(html, yoast));
-  const cwvOut = detectCwvIssues(html);
+  issues.push(...detectSchemaIssues(fullHtml, yoast));
+  const cwvOut = detectCwvIssues(fullHtml);
   issues.push(...cwvOut.issues);
 
   // Score = 100 minus weighted penalties
-  const weights: Record<Sev, number> = { critical: 12, high: 6, medium: 3, polish: 1 };
+  const weights: Record<Sev, number> = { critical: 18, high: 8, medium: 4, polish: 1 };
   let penalty = 0;
   for (const i of issues) penalty += weights[i.severity] || 0;
-  const score = HARD(100 - penalty);
+  let score = HARD(100 - penalty);
+  if (live && (!live.ok || live.looks404)) score = Math.min(score, 3);
+  else if (live && live.wordCount < 120) score = Math.min(score, 8);
+  if (issues.some((i) => ["schema-leak-visible", "css-leak-visible", "encoded-json-visible"].includes(i.code))) score = Math.min(score, 25);
 
   return {
     score, issues,
     metrics: {
       wordCount, titleLen: tLen, metaDescLen: dLen,
-      h1: countMatches(html, /<h1[\s>]/gi), h2: countMatches(html, /<h2[\s>]/gi),
+      scoredFrom: live?.ok ? "live_html" : "rest_fallback",
+      live: live ? { status: live.status, ok: live.ok, url: live.url, finalUrl: live.finalUrl, source: live.source, wordCount: live.wordCount, bytes: live.bytes } : null,
+      h1: countMatches(fullHtml, /<h1[\s>]/gi), h2: countMatches(html, /<h2[\s>]/gi),
       images: imgs.length, missingAlt, internalLinks: internal, externalLinks: external,
       flesch: Math.round(fk), monthsSinceUpdate: Math.round(months),
       tables: countMatches(html, /<table\b/gi),
