@@ -676,14 +676,19 @@ Deno.serve(async (req) => {
   // ── SCAN_ALL chunk (parallel) ────────────────────────────────────────────
   if (body?.mode === "scan_all") {
     const offset = Math.max(0, Number(body.offset) || 0);
-    const limit = Math.max(1, Math.min(20, Number(body.limit) || 10));
+    const limit = Math.max(1, Math.min(8, Number(body.limit) || 5));
     const { data: posts, error } = await supabase
       .from("wp_posts_cache")
       .select("post_id, slug, title, link, modified_at, data")
       .order("post_id", { ascending: true })
       .range(offset, offset + limit - 1);
     if (error || !posts) return new Response(JSON.stringify({ error: error?.message || "no cache" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    const scores = await Promise.all(posts.map((p) => scoreOneAndPersist(supabase, p).catch(() => null)));
+    // Sequential to stay under the 2s CPU budget (live URL probe + heavy regex)
+    const scores: (number | null)[] = [];
+    for (const p of posts) {
+      try { scores.push(await scoreOneAndPersist(supabase, p)); }
+      catch { scores.push(null); }
+    }
     const { count } = await supabase.from("wp_posts_cache").select("*", { count: "exact", head: true });
     return new Response(JSON.stringify({
       scanned: scores.filter((s) => s !== null).length,
