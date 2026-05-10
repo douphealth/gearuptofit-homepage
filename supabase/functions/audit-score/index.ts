@@ -766,10 +766,23 @@ Deno.serve(async (req) => {
     const requested = Array.isArray(body?.post_ids)
       ? body.post_ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id)).slice(0, 5000)
       : [];
-    const q = supabase.from("audit_scores").select("post_id, score, issues, metrics, scanned_at");
-    const { data, error } = requested.length ? await q.in("post_id", requested) : await q.range(0, 4999);
-    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    const rows = data || [];
+    let rows: any[] = [];
+    if (requested.length) {
+      for (let i = 0; i < requested.length; i += 500) {
+        const chunk = requested.slice(i, i + 500);
+        const { data, error } = await supabase
+          .from("audit_scores")
+          .select("post_id, score, issues, metrics, scanned_at")
+          .in("post_id", chunk)
+          .range(0, chunk.length - 1);
+        if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        rows.push(...(data || []));
+      }
+    } else {
+      const { data, error } = await supabase.from("audit_scores").select("post_id, score, issues, metrics, scanned_at").range(0, 4999);
+      if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      rows = data || [];
+    }
     if (requested.length) {
       const found = new Set(rows.map((r: any) => Number(r.post_id)));
       const missing = requested.filter((id: number) => !found.has(id)).map((id: number) => ({
