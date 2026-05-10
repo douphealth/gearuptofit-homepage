@@ -297,11 +297,7 @@ CRITICAL:
   • Avoid every banned phrase listed in your instructions.`;
 
   // ---------- BYOK provider routing ----------
-  // Body may include _llm: { provider, apiKey, model }. Falls back to Lovable AI.
-  const body: any = await (async () => {
-    try { return await req.clone().json(); } catch { return {}; }
-  })();
-  const llm = body?._llm || null;
+  // reqBody._llm: { provider, apiKey, model } — falls back to Lovable AI.
 
   type CallResult = { ok: true; content: string } | { ok: false; status: number; detail: string };
 
