@@ -5,8 +5,8 @@
 //
 // Modes:
 //   { mode: "list", post_ids?: number[] }   → return cached scores
-//   { post_ids: number[] }                   → score N posts (sequential, max 8)
-//   { mode: "scan_all", offset?, limit? }    → score a tiny sequential chunk to protect edge CPU
+//   { post_ids: number[] }                   → score exact cached post IDs synchronously (max 1)
+//   { mode: "scan_all", offset?, limit? }    → legacy exact chunk, synchronous and bounded
 
 import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
@@ -150,7 +150,7 @@ async function fetchLiveInspection(url: string): Promise<LiveInspection> {
     const res = await fetch(target, {
       headers: { "User-Agent": "GearupAudit/5.0 (+live-rendered-scoring)", accept: "text/html,application/xhtml+xml" },
       redirect: "follow",
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(5500),
     });
     const raw = await res.text().catch(() => "");
     const html = raw.length > 250_000 ? raw.slice(0, 250_000) : raw;
