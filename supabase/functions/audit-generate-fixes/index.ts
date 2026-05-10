@@ -367,10 +367,43 @@ CRITICAL:
   }
 
   if (!result.ok) {
-    if (result.status === 429) return new Response(JSON.stringify({ error: "Rate limited by LLM provider, try again shortly" }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    if (result.status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted. Add a personal LLM key in the LLM settings, or top up your Lovable AI balance." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    if (result.status === 401 || result.status === 403) return new Response(JSON.stringify({ error: "LLM auth failed — check your API key in the LLM settings.", detail: result.detail }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    return new Response(JSON.stringify({ error: "LLM error", detail: result.detail }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const usingByok = !!(llm?.provider && llm?.apiKey);
+    const providerName = usingByok ? llm.provider : "lovable";
+
+    // Try to extract a useful nested error message from the provider response
+    let nestedMsg = "";
+    let nestedMeta: any = null;
+    try {
+      const parsed = JSON.parse(result.detail);
+      nestedMsg = parsed?.error?.message || parsed?.message || "";
+      nestedMeta = parsed?.error?.metadata || null;
+    } catch { /* not JSON */ }
+
+    // OpenRouter account-level provider restriction
+    if (providerName === "openrouter" && nestedMeta?.available_providers && /no allowed providers/i.test(nestedMsg)) {
+      const allowed = (nestedMeta.available_providers || []).join(", ") || "none";
+      return new Response(JSON.stringify({
+        error: `OpenRouter blocked this model. Your OpenRouter account is restricted to providers: [${allowed}]. Either (a) pick a model served by those providers, or (b) remove the provider allow-list at openrouter.ai → Settings → Privacy/Providers, then retry.`,
+        detail: result.detail,
+      }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (result.status === 429) {
+      const hint = usingByok
+        ? `${providerName} rate-limited the request. Wait a moment and retry, or switch to a different provider in LLM settings.`
+        : "Lovable AI is rate-limiting this workspace. Wait ~30s and retry, or open LLM settings and add your own OpenAI / Anthropic / Gemini / OpenRouter key (BYOK) to bypass shared quotas.";
+      return new Response(JSON.stringify({ error: hint }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (result.status === 402) {
+      return new Response(JSON.stringify({ error: "AI credits exhausted. Add a personal LLM key in the LLM settings, or top up your Lovable AI balance." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (result.status === 401 || result.status === 403) {
+      return new Response(JSON.stringify({ error: `Auth failed for ${providerName}. ${nestedMsg || "Check your API key in LLM settings."}`, detail: result.detail }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (result.status === 404) {
+      return new Response(JSON.stringify({ error: `${providerName} rejected the model. ${nestedMsg || "The model slug may be invalid for this provider — change it in LLM settings."}`, detail: result.detail }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ error: `${providerName} error: ${nestedMsg || "request failed"}`, detail: result.detail }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
   let raw = result.content || "";
