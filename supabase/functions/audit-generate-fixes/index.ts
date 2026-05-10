@@ -216,7 +216,8 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { post_id, force } = await req.json();
+  const reqBody = await req.json();
+  const { post_id, force, _llm: llm } = reqBody;
   if (!post_id) {
     return new Response(JSON.stringify({ error: "post_id required" }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -295,33 +296,94 @@ CRITICAL:
   • qualitySelfScore must be a brutally honest evaluation. If the draft has any generic prose, score it accordingly.
   • Avoid every banned phrase listed in your instructions.`;
 
-  const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${Deno.env.get("LOVABLE_API_KEY")}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [
-        { role: "system", content: SYSTEM },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: { type: "json_object" },
-    }),
-  });
+  // ---------- BYOK provider routing ----------
+  // reqBody._llm: { provider, apiKey, model } — falls back to Lovable AI.
 
-  if (!r.ok) {
-    const txt = await r.text();
-    if (r.status === 429) return new Response(JSON.stringify({ error: "Rate limited, try again shortly" }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    if (r.status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted. Add funds in Settings → Workspace → Cloud & AI balance." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    return new Response(JSON.stringify({ error: "AI error", detail: txt }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  type CallResult = { ok: true; content: string } | { ok: false; status: number; detail: string };
+
+  async function callOpenAICompat(url: string, key: string, model: string, extraHeaders: Record<string, string> = {}): Promise<CallResult> {
+    const rr = await fetch(url, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json", ...extraHeaders },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: SYSTEM },
+          { role: "user", content: userPrompt + "\n\nReturn STRICT JSON only — no markdown, no prose, no code fences." },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    });
+    if (!rr.ok) return { ok: false, status: rr.status, detail: await rr.text() };
+    const jj = await rr.json();
+    return { ok: true, content: jj.choices?.[0]?.message?.content ?? "" };
   }
 
-  const j = await r.json();
+  async function callAnthropic(key: string, model: string): Promise<CallResult> {
+    const rr = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 8192,
+        system: SYSTEM + "\n\nYou MUST return STRICT JSON only — no markdown, no prose, no code fences. Start with { and end with }.",
+        messages: [{ role: "user", content: userPrompt }],
+      }),
+    });
+    if (!rr.ok) return { ok: false, status: rr.status, detail: await rr.text() };
+    const jj = await rr.json();
+    const content = Array.isArray(jj.content) ? jj.content.map((c: any) => c?.text || "").join("") : "";
+    return { ok: true, content };
+  }
+
+  let result: CallResult;
+  if (llm?.provider && llm?.apiKey) {
+    const model = String(llm.model || "").trim();
+    switch (llm.provider) {
+      case "openai":
+        result = await callOpenAICompat("https://api.openai.com/v1/chat/completions", llm.apiKey, model || "gpt-4o");
+        break;
+      case "openrouter":
+        result = await callOpenAICompat("https://openrouter.ai/api/v1/chat/completions", llm.apiKey, model || "anthropic/claude-3.5-sonnet", {
+          "HTTP-Referer": "https://gearuptofit.com",
+          "X-Title": "GearUpToFit Audit",
+        });
+        break;
+      case "gemini":
+        result = await callOpenAICompat("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", llm.apiKey, model || "gemini-2.5-pro");
+        break;
+      case "anthropic":
+        result = await callAnthropic(llm.apiKey, model || "claude-3-5-sonnet-20241022");
+        break;
+      default:
+        result = await callOpenAICompat("https://ai.gateway.lovable.dev/v1/chat/completions", Deno.env.get("LOVABLE_API_KEY")!, "google/gemini-2.5-flash");
+    }
+  } else {
+    result = await callOpenAICompat("https://ai.gateway.lovable.dev/v1/chat/completions", Deno.env.get("LOVABLE_API_KEY")!, "google/gemini-2.5-flash");
+  }
+
+  if (!result.ok) {
+    if (result.status === 429) return new Response(JSON.stringify({ error: "Rate limited by LLM provider, try again shortly" }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (result.status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted. Add a personal LLM key in the LLM settings, or top up your Lovable AI balance." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (result.status === 401 || result.status === 403) return new Response(JSON.stringify({ error: "LLM auth failed — check your API key in the LLM settings.", detail: result.detail }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: "LLM error", detail: result.detail }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  let raw = result.content || "";
+  // Strip code fences if a model added them.
+  raw = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
+  // If the model wrapped JSON in prose, extract the outermost {...}.
+  if (!raw.startsWith("{")) {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) raw = m[0];
+  }
   let fixes: any;
-  try { fixes = JSON.parse(j.choices[0].message.content); }
-  catch { fixes = { raw: j.choices[0].message.content }; }
+  try { fixes = JSON.parse(raw); }
+  catch { fixes = { raw }; }
 
   // Run deterministic quality gate
   const gate = evaluateQuality(fixes);
