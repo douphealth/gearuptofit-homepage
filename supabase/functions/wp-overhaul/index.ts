@@ -127,11 +127,29 @@ function stripOrphanCss(input: string): { html: string; removed: number } {
   while ((pm = reProt.exec(html))) protectedRanges.push([pm.index, pm.index + pm[0].length]);
   const inProtected = (i: number) => protectedRanges.some(([a, b]) => i >= a && i < b);
 
-  // 2. Remove CSS rule blocks (selector{...}) that are NOT inside a protected range.
-  //    Selector heuristic: starts with . # @ * letter, contains no <>, ends with `{...}`.
-  const cssRule = /(?:\/\*[\s\S]*?\*\/\s*)?[.#@*a-zA-Z][^<>{}\n]{0,200}\{[^<>{}]{1,800}\}/g;
+  // 2. Remove CSS rule blocks (selector{...}) — including empty bodies — outside protected ranges.
+  const cssRule = /(?:\/\*[\s\S]*?\*\/\s*)?[.#@*a-zA-Z][^<>{}\n]{0,200}\{[^<>{}]{0,1200}\}/g;
   html = html.replace(cssRule, (match, offset) => {
     if (inProtected(offset)) return match;
+    removed += match.length;
+    return "";
+  });
+
+  // 2b. Strip orphan @media / @supports / @keyframes prelude fragments without bodies.
+  html = html.replace(/@(?:media|supports|keyframes|import|font-face)\b[^<>{}\n]{0,200}(?:\{[^<>{}]{0,1200}\}?)?/gi, (match, offset) => {
+    if (inProtected(offset)) return match;
+    removed += match.length;
+    return "";
+  });
+
+  // 2c. Strip orphan selector fragments referencing our gutf-* design tokens
+  //     (e.g. ".gutf-proscons>", ".gutf-faq>"). These are bare class selectors
+  //     that leaked into visible text without an enclosing rule body.
+  html = html.replace(/\.gutf-[a-z0-9_-]+(?:\s*[>+~,]\s*\.?[a-z0-9_-]*)*\s*[>+~,;]?/gi, (match, offset) => {
+    if (inProtected(offset)) return match;
+    // Skip if this is part of a class="" attribute
+    const lookback = html.slice(Math.max(0, offset - 20), offset);
+    if (/class\s*=\s*["'][^"']*$/i.test(lookback)) return match;
     removed += match.length;
     return "";
   });
