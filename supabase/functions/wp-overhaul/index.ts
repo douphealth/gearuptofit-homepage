@@ -110,6 +110,44 @@ const RESPONSIVE_CSS = `<style>/*gutf-overhaul-v2*/
 }
 </style>`;
 
+// Strip orphan CSS that leaks as visible text.
+// Detects CSS rule blocks (`selector { ...declarations... }`) that live OUTSIDE
+// any `<style>`/`<script>` region and removes them. Also collapses CSS comments
+// (`/* ... */`) sitting in body text. This kills the "Site-wide sidebar hide"
+// and other CSS-as-text leaks caused by KSES partially stripping <style> tags.
+function stripOrphanCss(input: string): { html: string; removed: number } {
+  if (!input) return { html: input, removed: 0 };
+  let html = input;
+  let removed = 0;
+
+  // 1. Build protected ranges for <style>/<script> blocks (do NOT touch their CSS).
+  const protectedRanges: Array<[number, number]> = [];
+  const reProt = /<(style|script)\b[^>]*>[\s\S]*?<\/\1>/gi;
+  let pm: RegExpExecArray | null;
+  while ((pm = reProt.exec(html))) protectedRanges.push([pm.index, pm.index + pm[0].length]);
+  const inProtected = (i: number) => protectedRanges.some(([a, b]) => i >= a && i < b);
+
+  // 2. Remove CSS rule blocks (selector{...}) that are NOT inside a protected range.
+  //    Selector heuristic: starts with . # @ * letter, contains no <>, ends with `{...}`.
+  const cssRule = /(?:\/\*[\s\S]*?\*\/\s*)?[.#@*a-zA-Z][^<>{}\n]{0,200}\{[^<>{}]{1,800}\}/g;
+  html = html.replace(cssRule, (match, offset) => {
+    if (inProtected(offset)) return match;
+    removed += match.length;
+    return "";
+  });
+
+  // 3. Strip standalone CSS comments still floating in body text.
+  html = html.replace(/(?:^|>)\s*\/\*[\s\S]*?\*\/\s*(?=<|$)/g, (m) => {
+    removed += m.length;
+    return m.startsWith(">") ? ">" : "";
+  });
+
+  // 4. Tidy up empty wrappers wpautop may have left around the deleted CSS.
+  html = html.replace(/<p>\s*<\/p>/gi, "").replace(/<p>\s*(?:&nbsp;|\s)*<\/p>/gi, "");
+
+  return { html, removed };
+}
+
 function applyVisualFixes(raw: string): { html: string; changes: string[] } {
   const changes: string[] = [];
   let html = raw;
@@ -1093,6 +1131,10 @@ Deno.serve(async (req) => {
     contentSource = hasSlot ? "generated_seed_empty_rest" : "generated_seed_for_empty_template_post";
     await logEvent(postId, `Recovered empty editable content with generated seed (${diag}; live_slot=${hasSlot})`, true);
   }
+  // Aggressively strip orphan CSS leaks (e.g. "Site-wide sidebar hide", widget rules)
+  // BEFORE any transforms — guarantees the visible body never renders raw CSS as text.
+  const cssClean = stripOrphanCss(raw);
+  if (cssClean.removed > 0) raw = cssClean.html;
   const compactedRaw = compactRawHtml(raw);
   if (compactedRaw.truncated) {
     raw = compactedRaw.raw;
@@ -1182,7 +1224,9 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: false, post_id: postId, changes, message: `Refused final publish: generated body is still too thin (${bodyWords} words · ${bodyH2} H2).`, content_source: contentSource, body_word_count: bodyWords, body_h2_count: bodyH2 }, 200);
   }
 
-  // 4. PUT update
+  // 4. PUT update — final orphan-CSS sweep on the full document.
+  const finalClean = stripOrphanCss(html);
+  if (finalClean.removed > 0) { html = finalClean.html; changes.push(`stripped-orphan-css:${finalClean.removed}b`); }
   const runId = crypto.randomUUID();
   const marker = runMarker(runId);
   html = `${html}\n${runMarkerHtml(runId)}`;
