@@ -786,7 +786,7 @@ Deno.serve(async (req) => {
     const scores: (number | null)[] = [];
     for (const p of posts) {
       try { scores.push(await scoreOneAndPersist(supabase, p)); }
-      catch { scores.push(null); }
+      catch (error) { await persistScoreFailure(supabase, p, error); scores.push(0); }
     }
     const { count } = await supabase.from("wp_posts_cache").select("*", { count: "exact", head: true });
     return new Response(JSON.stringify({
@@ -810,7 +810,7 @@ Deno.serve(async (req) => {
   const scores: (number | null)[] = [];
   for (const p of posts) {
     try { scores.push(await scoreOneAndPersist(supabase, p)); }
-    catch { scores.push(null); }
+    catch (error) { await persistScoreFailure(supabase, p, error); scores.push(0); }
   }
   const valid = scores.filter((s) => s !== null) as number[];
   const avg = valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : 0;
