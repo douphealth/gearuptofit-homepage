@@ -181,8 +181,29 @@ function evaluateQuality(fixes: any) {
   // Alt text
   checks.push({ id: "alt_suggestions", label: "≥3 alt-text suggestions", pass: altSuggestions.length >= 3, weight: 3, detail: `${altSuggestions.length}` });
 
-  // Voice / banned-phrase scan across all generated copy
-  const corpus = [introHtml, faqHtml, conclusionHtml, metaTitle, metaDesc, ...faqArr.map((f: any) => `${f?.q} ${f?.a}`)].join(" ");
+  // Visual modules — premium magazine-grade design
+  const visualHtml = String(fixes?.visualModulesHtml || "");
+  const visualText = visualHtml.replace(/<[^>]+>/g, " ");
+  const moduleSections = (visualHtml.match(/<section\b/gi) || []).length;
+  const hasInlineStyle = /style\s*=\s*"/i.test(visualHtml);
+  const hasNoScript = !/<script\b/i.test(visualHtml);
+  const hasNoExternalCss = !/<link[^>]+stylesheet/i.test(visualHtml) && !/<style\b/i.test(visualHtml);
+  checks.push({ id: "visual_modules_count", label: "4-7 visual modules", pass: moduleSections >= 4 && moduleSections <= 8, weight: 8, detail: `${moduleSections} <section>` });
+  checks.push({ id: "visual_inline_style", label: "Modules use inline styles (WP-safe)", pass: hasInlineStyle, weight: 5 });
+  checks.push({ id: "visual_safe", label: "No <script> / <style> / external CSS", pass: hasNoScript && hasNoExternalCss, weight: 4 });
+  checks.push({ id: "visual_substance", label: "Visual modules carry real content (≥120 words)", pass: wordCount(visualHtml) >= 120, weight: 4, detail: `${wordCount(visualHtml)} words` });
+
+  // Humanization — discourage AI-flavored prose
+  const fullCorpus = [introHtml, faqHtml, conclusionHtml, visualText, ...faqArr.map((f: any) => `${f?.a || ""}`)].join(" ");
+  const contractionHits = (fullCorpus.match(/\b(?:you'll|don't|it's|you're|that's|we've|here's|won't|can't|isn't|aren't|i've|they're)\b/gi) || []).length;
+  checks.push({ id: "human_contractions", label: "Human contractions used (≥4)", pass: contractionHits >= 4, weight: 4, detail: `${contractionHits}` });
+  const emDashes = (fullCorpus.match(/—/g) || []).length;
+  const totalWords = wordCount(fullCorpus) || 1;
+  const emDashRatio = emDashes / (totalWords / 200);
+  checks.push({ id: "em_dash_restraint", label: "Em-dash restraint (≤1 per 200 words)", pass: emDashRatio <= 1.5, weight: 3, detail: `${emDashes} dashes / ${totalWords} words` });
+
+  // Voice / banned-phrase scan across all generated copy (incl. visual modules)
+  const corpus = [introHtml, faqHtml, conclusionHtml, visualText, metaTitle, metaDesc, ...faqArr.map((f: any) => `${f?.q} ${f?.a}`)].join(" ");
   const bp = bannedPhraseHit(corpus);
   checks.push({ id: "banned_phrases", label: "No banned/filler phrases", pass: !bp, weight: 6, detail: bp || "" });
 
