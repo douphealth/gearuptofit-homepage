@@ -106,7 +106,7 @@ async function getWpCount(entries?: SitemapEntry[]) {
   return { total, totalPages };
 }
 
-async function getCachedPosts(supabase: ReturnType<typeof createClient>) {
+async function getCachedPosts(supabase: any) {
   const PAGE = 1000;
   let from = 0;
   const all: any[] = [];
@@ -127,7 +127,7 @@ async function getCachedPosts(supabase: ReturnType<typeof createClient>) {
   return all;
 }
 
-async function getCachedCount(supabase: ReturnType<typeof createClient>) {
+async function getCachedCount(supabase: any) {
   const { count, error } = await supabase
     .from("wp_posts_cache")
     .select("post_id", { count: "exact", head: true });
@@ -135,7 +135,7 @@ async function getCachedCount(supabase: ReturnType<typeof createClient>) {
   return count || 0;
 }
 
-async function getDiagnostics(supabase: ReturnType<typeof createClient>, runId?: string) {
+async function getDiagnostics(supabase: any, runId?: string) {
   const runQuery = supabase
     .from("wp_import_runs")
     .select("*")
@@ -184,7 +184,7 @@ async function getDiagnostics(supabase: ReturnType<typeof createClient>, runId?:
   };
 }
 
-async function createRun(supabase: ReturnType<typeof createClient>) {
+async function createRun(supabase: any) {
   const { total, totalPages } = await getWpCount();
   const { data: run, error } = await supabase
     .from("wp_import_runs")
@@ -231,7 +231,7 @@ async function fetchWpPostBySlug(slug: string): Promise<WpPost | null> {
   return null;
 }
 
-async function fetchPage(supabase: ReturnType<typeof createClient>, runId: string, page: number) {
+async function fetchPage(supabase: any, runId: string, page: number) {
   const now = new Date().toISOString();
   await supabase
     .from("wp_import_pages")
@@ -316,7 +316,7 @@ async function fetchPage(supabase: ReturnType<typeof createClient>, runId: strin
   }
 }
 
-async function updateRunSummary(supabase: ReturnType<typeof createClient>, runId: string) {
+async function updateRunSummary(supabase: any, runId: string) {
   const { data: pages } = await supabase
     .from("wp_import_pages")
     .select("page,status,imported_count")
