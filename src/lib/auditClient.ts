@@ -21,7 +21,7 @@ export async function callAudit<T = any>(
   const pw = getAuditPw();
   if (!pw) throw new Error("Not authenticated");
   const { data, error } = await supabase.functions.invoke(path, {
-    body: { ...body, _audit_password: pw },
+    body: { ...body, ...llmBody(), _audit_password: pw },
   });
   if (error) {
     // Try to extract server-provided error from FunctionsHttpError
