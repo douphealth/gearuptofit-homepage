@@ -998,7 +998,10 @@ function DiagnosticPanel({ diagnostics, loading, onRetry }: { diagnostics: Diagn
     <Card className="mb-6">
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle className="text-base">WordPress Import Diagnostics</CardTitle>
+          <div>
+            <CardTitle className="text-base">WordPress Import Diagnostics</CardTitle>
+            <p className="text-xs text-muted-foreground">Source: {a?.source || "authoritative WordPress post sitemaps"}</p>
+          </div>
           <Button size="sm" variant="outline" onClick={onRetry} disabled={loading || !diagnostics?.run}>
             <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} /> Retry missing pages
           </Button>
