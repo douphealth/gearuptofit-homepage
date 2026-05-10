@@ -25,11 +25,35 @@ async function checkAuth(req: Request): Promise<boolean> {
 
 type Sev = "critical" | "high" | "medium" | "polish";
 type Issue = { severity: Sev; code: string; message: string; category?: "seo" | "aeo" | "geo" | "visual" | "content" | "schema" };
+type LiveInspection = {
+  url: string;
+  finalUrl: string;
+  status: number;
+  ok: boolean;
+  html: string;
+  contentHtml: string;
+  text: string;
+  wordCount: number;
+  source: "article" | "main" | "entry-content" | "body" | "none";
+  looks404: boolean;
+  bytes: number;
+};
 
 const HARD = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
 
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return decodeEntities(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+}
+function decodeEntities(text: string): string {
+  return String(text || "")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)));
 }
 function countMatches(s: string, re: RegExp): number {
   return (s.match(re) || []).length;
@@ -57,6 +81,89 @@ async function fetchPostDetails(postId: number) {
     } catch { /* try next */ }
   }
   return null;
+}
+
+function normalizeApexUrl(value?: string | null): string {
+  if (!value) return "";
+  return String(value)
+    .replace(/^https?:\/\/origin\.gearuptofit\.com/i, "https://gearuptofit.com")
+    .replace(/^http:\/\/gearuptofit\.com/i, "https://gearuptofit.com")
+    .replace(/#.*$/, "")
+    .trim();
+}
+
+function stripNonContent(html: string): string {
+  return String(html || "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<svg\b[\s\S]*?<\/svg>/gi, " ")
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, " ")
+    .replace(/<footer\b[\s\S]*?<\/footer>/gi, " ")
+    .replace(/<aside\b[\s\S]*?<\/aside>/gi, " ")
+    .replace(/<form\b[\s\S]*?<\/form>/gi, " ");
+}
+
+function extractLargest(html: string, re: RegExp): string {
+  let best = "";
+  for (const match of html.matchAll(re)) {
+    const block = match[0] || "";
+    if (stripHtml(stripNonContent(block)).split(/\s+/).filter(Boolean).length > stripHtml(stripNonContent(best)).split(/\s+/).filter(Boolean).length) best = block;
+  }
+  return best;
+}
+
+function extractLiveContent(html: string): Pick<LiveInspection, "contentHtml" | "text" | "wordCount" | "source"> {
+  const candidates: Array<{ source: LiveInspection["source"]; html: string }> = [
+    { source: "article", html: extractLargest(html, /<article\b[\s\S]*?<\/article>/gi) },
+    { source: "main", html: extractLargest(html, /<main\b[\s\S]*?<\/main>/gi) },
+    { source: "entry-content", html: extractLargest(html, /<(?:div|section)\b[^>]*class=["'][^"']*(?:entry-content|post-content|wp-block-post-content|gutf-article|td-post-content|single-post-content|article-content)[^"']*["'][^>]*>[\s\S]*?<\/(?:div|section)>/gi) },
+  ];
+  const scored = candidates
+    .map((c) => {
+      const cleaned = stripNonContent(c.html);
+      const text = stripHtml(cleaned);
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
+      return { ...c, html: cleaned, text, wordCount };
+    })
+    .filter((c) => c.wordCount > 0)
+    .sort((a, b) => b.wordCount - a.wordCount);
+  const best = scored[0];
+  if (best && best.wordCount >= 80) return { contentHtml: best.html, text: best.text, wordCount: best.wordCount, source: best.source };
+  const body = (html.match(/<body\b[\s\S]*?<\/body>/i)?.[0] || html);
+  const bodyClean = stripNonContent(body);
+  const bodyText = stripHtml(bodyClean);
+  return {
+    contentHtml: bodyClean,
+    text: bodyText,
+    wordCount: bodyText.split(/\s+/).filter(Boolean).length,
+    source: bodyText ? "body" : "none",
+  };
+}
+
+async function fetchLiveInspection(url: string): Promise<LiveInspection> {
+  const target = normalizeApexUrl(url);
+  const empty: LiveInspection = { url: target, finalUrl: target, status: 0, ok: false, html: "", contentHtml: "", text: "", wordCount: 0, source: "none", looks404: true, bytes: 0 };
+  if (!target || !/^https?:\/\//i.test(target)) return empty;
+  try {
+    const res = await fetch(target, {
+      headers: { "User-Agent": "GearupAudit/5.0 (+live-rendered-scoring)", accept: "text/html,application/xhtml+xml" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(10000),
+    });
+    const raw = await res.text().catch(() => "");
+    const html = raw.length > 500_000 ? raw.slice(0, 500_000) : raw;
+    const extracted = extractLiveContent(html);
+    const looks404 =
+      res.status === 404 ||
+      /\bpage you requested could not be found\b/i.test(html) ||
+      /<title>[^<]*\b(404|not found|page not found)\b[^<]*<\/title>/i.test(html) ||
+      /\bnothing found\b.*\bsearching will help\b/is.test(html);
+    return { url: target, finalUrl: res.url || target, status: res.status, ok: res.ok && !looks404, html, ...extracted, looks404, bytes: raw.length };
+  } catch {
+    return empty;
+  }
 }
 
 /* -------------------------- VISUAL HEURISTICS -------------------------- */
@@ -394,11 +501,11 @@ function detectCwvIssues(html: string): { issues: Issue[]; cwv: any } {
 }
 
 /* ----------------------------- SEO / AEO ------------------------------ */
-function detectStructureIssues(html: string, text: string, wordCount: number): Issue[] {
+function detectStructureIssues(html: string, text: string, wordCount: number, fullHtml = html): Issue[] {
   const issues: Issue[] = [];
 
   // H1 hierarchy
-  const h1 = countMatches(html, /<h1[\s>]/gi);
+  const h1 = countMatches(fullHtml, /<h1[\s>]/gi);
   if (h1 > 1) issues.push({ severity: "high", category: "seo", code: "multi-h1", message: `${h1} H1 tags found (should be 1)` });
   if (h1 === 0) issues.push({ severity: "high", category: "seo", code: "no-h1", message: "No H1 tag in content" });
 
@@ -444,10 +551,42 @@ function detectStructureIssues(html: string, text: string, wordCount: number): I
   }
 
   // Last-updated visibility
-  if (!/(?:last\s+updated|updated\s+on|reviewed\s+on)\b/i.test(html.slice(0, 4000))) {
+  if (!/(?:last\s+updated|updated\s+on|reviewed\s+on)\b/i.test(fullHtml.slice(0, 8000))) {
     issues.push({ severity: "polish", category: "seo", code: "no-updated-date", message: "No 'last updated' date visible to readers" });
   }
 
+  return issues;
+}
+
+function detectContentIntegrityIssues(html: string, text: string, live?: LiveInspection | null): Issue[] {
+  const issues: Issue[] = [];
+  const visible = decodeEntities(text);
+  if (live && (!live.ok || live.looks404)) {
+    issues.push({
+      severity: "critical", category: "content", code: live.looks404 ? "live-404" : "live-unreachable",
+      message: `Live page is not a valid published article (HTTP ${live.status || "0"}) — ${live.url}`,
+    });
+  }
+  if (live && live.ok && live.wordCount < 120) {
+    issues.push({ severity: "critical", category: "content", code: "live-empty", message: `Live article content is almost empty (${live.wordCount} words extracted from ${live.source})` });
+  }
+  if (/@context\s*[:{]|schema\.org|"@graph"|"@type"\s*:/i.test(visible)) {
+    issues.push({ severity: "critical", category: "content", code: "schema-leak-visible", message: "JSON-LD/schema markup is visible inside reader text" });
+  }
+  if (/\/\*[^*]{0,80}(?:site-wide|sidebar|widget|gutf|wp-|important)|\.[a-z][\w-]*(?:>|\s*,|\s*\{)|@media\s*\(/i.test(visible)) {
+    issues.push({ severity: "critical", category: "visual", code: "css-leak-visible", message: "CSS selectors/rules are visible inside reader text" });
+  }
+  if (/\{\s*"(?:@context|@type|headline|description)"/i.test(visible) || /&quot;@context&quot;|&#8220;@context/i.test(text)) {
+    issues.push({ severity: "critical", category: "content", code: "encoded-json-visible", message: "Encoded JSON/structured-data fragments are visible in the post body" });
+  }
+  const badShortcodes = visible.match(/\[(?:vc_|et_|caption|gallery|embed|shortcode)[^\]]*\]/gi) || [];
+  if (badShortcodes.length) {
+    issues.push({ severity: "high", category: "content", code: "shortcode-leak", message: `${badShortcodes.length} raw shortcode(s) visible to readers` });
+  }
+  const emptyBlocks = countMatches(html, /<(?:p|h2|h3|li)\b[^>]*>\s*(?:&nbsp;|<br\s*\/?>|\s)*<\/(?:p|h2|h3|li)>/gi);
+  if (emptyBlocks > 8) {
+    issues.push({ severity: "medium", category: "content", code: "empty-html-blocks", message: `${emptyBlocks} empty paragraph/list/heading blocks in rendered content` });
+  }
   return issues;
 }
 
@@ -483,18 +622,32 @@ function detectSchemaIssues(html: string, yoast: any): Issue[] {
   return issues;
 }
 
-function scorePost(post: any): { score: number; issues: Issue[]; metrics: any } {
+function scorePost(post: any, live?: LiveInspection | null): { score: number; issues: Issue[]; metrics: any } {
   const data = post.data || {};
   const title = stripHtml(data.title?.rendered || post.title || "");
-  const html = data.content?.rendered || "";
+  const restHtml = data.content?.rendered || "";
+  const html = live?.contentHtml || restHtml;
+  const fullHtml = live?.html || restHtml;
   const excerpt = stripHtml(data.excerpt?.rendered || "");
   const yoast = data.yoast_head_json || {};
   const yoastTitle = yoast.title || "";
   const yoastDesc = yoast.description || "";
-  const text = stripHtml(html);
-  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const text = live?.text || stripHtml(html);
+  const wordCount = live?.wordCount ?? text.split(/\s+/).filter(Boolean).length;
 
   const issues: Issue[] = [];
+
+  if (!live) {
+    issues.push({ severity: "high", category: "content", code: "live-not-inspected", message: "Score used REST content only because live HTML inspection was unavailable" });
+  } else if (!live.ok || live.looks404) {
+    issues.push({ severity: "critical", category: "content", code: "live-invalid", message: `Live URL failed validation (HTTP ${live.status || "0"}) — score forced very low` });
+  } else {
+    const restWords = stripHtml(restHtml).split(/\s+/).filter(Boolean).length;
+    const delta = Math.abs(restWords - wordCount);
+    if (restWords > 0 && delta > Math.max(250, restWords * 0.35)) {
+      issues.push({ severity: "high", category: "content", code: "rest-live-mismatch", message: `REST body (${restWords} words) differs from live rendered article (${wordCount} words); scoring uses live HTML` });
+    }
+  }
 
   // Title
   const tLen = (yoastTitle || title).length;
@@ -535,23 +688,29 @@ function scorePost(post: any): { score: number; issues: Issue[]; metrics: any } 
   if (external === 0 && wordCount > 800) issues.push({ severity: "polish", category: "seo", code: "no-citations", message: "No outbound citations (E-E-A-T)" });
 
   // Push composed checks
-  issues.push(...detectStructureIssues(html, text, wordCount));
+  issues.push(...detectStructureIssues(html, text, wordCount, fullHtml));
+  issues.push(...detectContentIntegrityIssues(html, text, live));
   issues.push(...detectVisualIssues(html));
-  issues.push(...detectSchemaIssues(html, yoast));
-  const cwvOut = detectCwvIssues(html);
+  issues.push(...detectSchemaIssues(fullHtml, yoast));
+  const cwvOut = detectCwvIssues(fullHtml);
   issues.push(...cwvOut.issues);
 
   // Score = 100 minus weighted penalties
-  const weights: Record<Sev, number> = { critical: 12, high: 6, medium: 3, polish: 1 };
+  const weights: Record<Sev, number> = { critical: 18, high: 8, medium: 4, polish: 1 };
   let penalty = 0;
   for (const i of issues) penalty += weights[i.severity] || 0;
-  const score = HARD(100 - penalty);
+  let score = HARD(100 - penalty);
+  if (live && (!live.ok || live.looks404)) score = Math.min(score, 3);
+  else if (live && live.wordCount < 120) score = Math.min(score, 8);
+  if (issues.some((i) => ["schema-leak-visible", "css-leak-visible", "encoded-json-visible"].includes(i.code))) score = Math.min(score, 25);
 
   return {
     score, issues,
     metrics: {
       wordCount, titleLen: tLen, metaDescLen: dLen,
-      h1: countMatches(html, /<h1[\s>]/gi), h2: countMatches(html, /<h2[\s>]/gi),
+      scoredFrom: live?.ok ? "live_html" : "rest_fallback",
+      live: live ? { status: live.status, ok: live.ok, url: live.url, finalUrl: live.finalUrl, source: live.source, wordCount: live.wordCount, bytes: live.bytes } : null,
+      h1: countMatches(fullHtml, /<h1[\s>]/gi), h2: countMatches(html, /<h2[\s>]/gi),
       images: imgs.length, missingAlt, internalLinks: internal, externalLinks: external,
       flesch: Math.round(fk), monthsSinceUpdate: Math.round(months),
       tables: countMatches(html, /<table\b/gi),
@@ -563,85 +722,11 @@ function scorePost(post: any): { score: number; issues: Issue[]; metrics: any } 
   };
 }
 
-/**
- * Probe the LIVE public URL of a post to catch:
- *   - 404 / "Not Found" pages still indexed in WP REST cache
- *   - Pages that return 200 but render an empty / "page you requested could not be found" body
- * Returns a critical issue + a forced low score when broken.
- */
-async function probeLiveUrl(url: string): Promise<{ issue: Issue | null; forcedScore: number | null }> {
-  if (!url || !/^https?:\/\//i.test(url)) return { issue: null, forcedScore: null };
-  try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "GearupAudit/4.0 (+live-probe)", accept: "text/html", range: "bytes=0-180000" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(8000),
-    });
-    const status = res.status;
-    const rawHtml = await res.text().catch(() => "");
-    // Cap to ~250KB to avoid CPU blow-up on huge pages
-    const html = rawHtml.length > 250_000 ? rawHtml.slice(0, 250_000) : rawHtml;
-    const bodyText = stripHtml(
-      (html.match(/<main[\s\S]*?<\/main>/i)?.[0] || html.match(/<article[\s\S]*?<\/article>/i)?.[0] || html)
-        .replace(/<script[\s\S]*?<\/script>/gi, "")
-        .replace(/<style[\s\S]*?<\/style>/gi, "")
-        .replace(/<nav[\s\S]*?<\/nav>/gi, "")
-        .replace(/<footer[\s\S]*?<\/footer>/gi, ""),
-    );
-    const wc = bodyText.split(/\s+/).filter(Boolean).length;
-    const looks404 =
-      status === 404 ||
-      /\bpage you requested could not be found\b/i.test(html) ||
-      /<title>[^<]*\b(404|not found|page not found)\b[^<]*<\/title>/i.test(html) ||
-      /\bnothing found\b.*\bsearching will help\b/is.test(html);
-    if (looks404) {
-      return {
-        issue: {
-          severity: "critical",
-          category: "content",
-          code: "live-404",
-          message: `Live URL returns Not Found (HTTP ${status}) — "${url}" is broken or unpublished`,
-        },
-        forcedScore: 1,
-      };
-    }
-    if (wc < 80) {
-      return {
-        issue: {
-          severity: "critical",
-          category: "content",
-          code: "live-empty",
-          message: `Live URL renders empty content (${wc} words in <main>) — broken template, missing body, or stripped post`,
-        },
-        forcedScore: 5,
-      };
-    }
-    return { issue: null, forcedScore: null };
-  } catch (e) {
-    return {
-      issue: {
-        severity: "high",
-        category: "content",
-        code: "live-unreachable",
-        message: `Live URL unreachable: ${(e as Error).message}`,
-      },
-      forcedScore: null,
-    };
-  }
-}
-
 async function scoreOneAndPersist(supabase: any, post: any) {
   const details = await fetchPostDetails(Number(post.post_id));
-  const r = scorePost({ ...post, data: details || post.data });
-
-  // ── Live URL probe — catches 404s and empty rendered bodies ──────────────
-  const liveUrl = post.link || details?.link || "";
-  const probe = await probeLiveUrl(liveUrl);
-  if (probe.issue) {
-    // Prepend so it surfaces at the top of the issues column
-    r.issues = [probe.issue, ...r.issues];
-    if (probe.forcedScore !== null) r.score = probe.forcedScore;
-  }
+  const liveUrl = normalizeApexUrl(post.link || details?.link || "");
+  const live = await fetchLiveInspection(liveUrl);
+  const r = scorePost({ ...post, data: details || post.data, link: liveUrl }, live);
 
   const now = new Date().toISOString();
   await supabase.from("audit_scores").upsert(
@@ -650,6 +735,19 @@ async function scoreOneAndPersist(supabase: any, post: any) {
   );
   await supabase.from("audit_history").insert({ post_id: post.post_id, score: r.score, scanned_at: now });
   return r.score;
+}
+
+async function persistScoreFailure(supabase: any, post: any, error: unknown) {
+  const now = new Date().toISOString();
+  const issue: Issue = {
+    severity: "critical", category: "content", code: "score-failed",
+    message: `Scoring failed for this URL: ${error instanceof Error ? error.message : "unknown error"}`,
+  };
+  await supabase.from("audit_scores").upsert(
+    { post_id: post.post_id, score: 0, issues: [issue], metrics: { scoredFrom: "failed", live: { url: post.link || "" } }, scanned_at: now },
+    { onConflict: "post_id" },
+  );
+  await supabase.from("audit_history").insert({ post_id: post.post_id, score: 0, scanned_at: now });
 }
 
 Deno.serve(async (req) => {
@@ -671,7 +769,19 @@ Deno.serve(async (req) => {
     const q = supabase.from("audit_scores").select("post_id, score, issues, metrics, scanned_at");
     const { data, error } = requested.length ? await q.in("post_id", requested) : await q.range(0, 4999);
     if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    return new Response(JSON.stringify({ scores: data || [] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const rows = data || [];
+    if (requested.length) {
+      const found = new Set(rows.map((r: any) => Number(r.post_id)));
+      const missing = requested.filter((id: number) => !found.has(id)).map((id: number) => ({
+        post_id: id,
+        score: 0,
+        issues: [{ severity: "critical", category: "content", code: "not-scored", message: "This published URL has not been scored yet — run Re-score all or score this post immediately" }],
+        metrics: { scoredFrom: "missing" },
+        scanned_at: null,
+      }));
+      return new Response(JSON.stringify({ scores: [...rows, ...missing] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ scores: rows }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
   // ── SCAN_ALL chunk (parallel) ────────────────────────────────────────────
@@ -688,7 +798,7 @@ Deno.serve(async (req) => {
     const scores: (number | null)[] = [];
     for (const p of posts) {
       try { scores.push(await scoreOneAndPersist(supabase, p)); }
-      catch { scores.push(null); }
+      catch (error) { await persistScoreFailure(supabase, p, error); scores.push(0); }
     }
     const { count } = await supabase.from("wp_posts_cache").select("*", { count: "exact", head: true });
     return new Response(JSON.stringify({
@@ -712,7 +822,7 @@ Deno.serve(async (req) => {
   const scores: (number | null)[] = [];
   for (const p of posts) {
     try { scores.push(await scoreOneAndPersist(supabase, p)); }
-    catch { scores.push(null); }
+    catch (error) { await persistScoreFailure(supabase, p, error); scores.push(0); }
   }
   const valid = scores.filter((s) => s !== null) as number[];
   const avg = valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : 0;
