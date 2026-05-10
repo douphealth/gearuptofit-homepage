@@ -708,7 +708,11 @@ Deno.serve(async (req) => {
     .select("post_id, slug, title, link, modified_at, data").in("post_id", ids);
   if (!posts || !posts.length) return new Response(JSON.stringify({ error: "no cached posts" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-  const scores = await Promise.all(posts.map((p) => scoreOneAndPersist(supabase, p).catch(() => null)));
+  const scores: (number | null)[] = [];
+  for (const p of posts) {
+    try { scores.push(await scoreOneAndPersist(supabase, p)); }
+    catch { scores.push(null); }
+  }
   const valid = scores.filter((s) => s !== null) as number[];
   const avg = valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : 0;
   return new Response(JSON.stringify({ scanned: valid.length, avgScore: avg }), {
