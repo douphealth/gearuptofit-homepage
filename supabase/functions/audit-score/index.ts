@@ -501,11 +501,11 @@ function detectCwvIssues(html: string): { issues: Issue[]; cwv: any } {
 }
 
 /* ----------------------------- SEO / AEO ------------------------------ */
-function detectStructureIssues(html: string, text: string, wordCount: number): Issue[] {
+function detectStructureIssues(html: string, text: string, wordCount: number, fullHtml = html): Issue[] {
   const issues: Issue[] = [];
 
   // H1 hierarchy
-  const h1 = countMatches(html, /<h1[\s>]/gi);
+  const h1 = countMatches(fullHtml, /<h1[\s>]/gi);
   if (h1 > 1) issues.push({ severity: "high", category: "seo", code: "multi-h1", message: `${h1} H1 tags found (should be 1)` });
   if (h1 === 0) issues.push({ severity: "high", category: "seo", code: "no-h1", message: "No H1 tag in content" });
 
@@ -551,10 +551,42 @@ function detectStructureIssues(html: string, text: string, wordCount: number): I
   }
 
   // Last-updated visibility
-  if (!/(?:last\s+updated|updated\s+on|reviewed\s+on)\b/i.test(html.slice(0, 4000))) {
+  if (!/(?:last\s+updated|updated\s+on|reviewed\s+on)\b/i.test(fullHtml.slice(0, 8000))) {
     issues.push({ severity: "polish", category: "seo", code: "no-updated-date", message: "No 'last updated' date visible to readers" });
   }
 
+  return issues;
+}
+
+function detectContentIntegrityIssues(html: string, text: string, live?: LiveInspection | null): Issue[] {
+  const issues: Issue[] = [];
+  const visible = decodeEntities(text);
+  if (live && (!live.ok || live.looks404)) {
+    issues.push({
+      severity: "critical", category: "content", code: live.looks404 ? "live-404" : "live-unreachable",
+      message: `Live page is not a valid published article (HTTP ${live.status || "0"}) — ${live.url}`,
+    });
+  }
+  if (live && live.ok && live.wordCount < 120) {
+    issues.push({ severity: "critical", category: "content", code: "live-empty", message: `Live article content is almost empty (${live.wordCount} words extracted from ${live.source})` });
+  }
+  if (/@context\s*[:{]|schema\.org|"@graph"|"@type"\s*:/i.test(visible)) {
+    issues.push({ severity: "critical", category: "content", code: "schema-leak-visible", message: "JSON-LD/schema markup is visible inside reader text" });
+  }
+  if (/\/\*[^*]{0,80}(?:site-wide|sidebar|widget|gutf|wp-|important)|\.[a-z][\w-]*(?:>|\s*,|\s*\{)|@media\s*\(/i.test(visible)) {
+    issues.push({ severity: "critical", category: "visual", code: "css-leak-visible", message: "CSS selectors/rules are visible inside reader text" });
+  }
+  if (/\{\s*"(?:@context|@type|headline|description)"/i.test(visible) || /&quot;@context&quot;|&#8220;@context/i.test(text)) {
+    issues.push({ severity: "critical", category: "content", code: "encoded-json-visible", message: "Encoded JSON/structured-data fragments are visible in the post body" });
+  }
+  const badShortcodes = visible.match(/\[(?:vc_|et_|caption|gallery|embed|shortcode)[^\]]*\]/gi) || [];
+  if (badShortcodes.length) {
+    issues.push({ severity: "high", category: "content", code: "shortcode-leak", message: `${badShortcodes.length} raw shortcode(s) visible to readers` });
+  }
+  const emptyBlocks = countMatches(html, /<(?:p|h2|h3|li)\b[^>]*>\s*(?:&nbsp;|<br\s*\/?>|\s)*<\/(?:p|h2|h3|li)>/gi);
+  if (emptyBlocks > 8) {
+    issues.push({ severity: "medium", category: "content", code: "empty-html-blocks", message: `${emptyBlocks} empty paragraph/list/heading blocks in rendered content` });
+  }
   return issues;
 }
 
