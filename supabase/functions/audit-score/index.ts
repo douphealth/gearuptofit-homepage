@@ -153,7 +153,7 @@ async function fetchLiveInspection(url: string): Promise<LiveInspection> {
       signal: AbortSignal.timeout(10000),
     });
     const raw = await res.text().catch(() => "");
-    const html = raw.length > 500_000 ? raw.slice(0, 500_000) : raw;
+    const html = raw.length > 250_000 ? raw.slice(0, 250_000) : raw;
     const extracted = extractLiveContent(html);
     const looks404 =
       res.status === 404 ||
