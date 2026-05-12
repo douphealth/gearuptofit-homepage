@@ -178,13 +178,19 @@ function rewriteAssetStringsInText(text, prefix) {
 // location read inside createBrowserHistory(), so <Routes> matches `/`.
 function patchReactRouterPathname(text, prefix) {
   // Minified pattern: `let{pathname:o,search:a,hash:s}=n.location;`
-  // We accept any single-letter identifiers.
   return text.replace(
     /let\{pathname:([a-zA-Z_$]),search:([a-zA-Z_$]),hash:([a-zA-Z_$])\}=([a-zA-Z_$]+)\.location;/g,
     (_m, p, s, h, n) =>
       `let{pathname:${p},search:${s},hash:${h}}=${n}.location;` +
       `${p}=(${p}.indexOf(${JSON.stringify(prefix + '/')})===0?${p}.slice(${prefix.length})||"/":${p}===${JSON.stringify(prefix)}?"/":${p});`,
   );
+}
+
+// TanStack Start surgical patch — the bundler emits `basepath:""` in the
+// router init call (D2()). We rewrite that single literal to the apex
+// prefix so TSR's parsePathname strips it and matches the `/` route.
+function patchTanstackBasepath(text, prefix) {
+  return text.replace(/basepath:""/g, `basepath:${JSON.stringify(prefix)}`);
 }
 
 class AttrPrefixer {
