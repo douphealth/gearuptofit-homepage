@@ -44,11 +44,15 @@ if (tokenVerification.success && tokenVerification.result?.status === 'active') 
   wranglerEnv.CLOUDFLARE_API_KEY = cloudflareSecret;
 }
 
-const deploy = spawnSync('wrangler', ['deploy', 'worker.js'], {
+const deploy = spawnSync('bunx', ['--bun', 'wrangler@latest', 'deploy', 'worker.js'], {
   stdio: 'inherit',
   env: wranglerEnv,
 });
 
+if (deploy.error) {
+  console.error('wrangler spawn failed:', deploy.error.message);
+  process.exit(1);
+}
 if (deploy.status !== 0) process.exit(deploy.status ?? 1);
 
 const sitemapCheck = spawnSync('curl', ['-fsSI', 'https://gearuptofit.com/sitemap-posts.xml'], {
