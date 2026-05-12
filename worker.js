@@ -5,6 +5,23 @@ const SITEMAP_TTL = 3600;
 const MAX_REST_PAGES = 50;
 const AUTHORITATIVE_POST_SITEMAPS = ['/post-sitemap.xml', '/post-sitemap2.xml'];
 
+// Reverse-proxied Lovable apps mounted under apex paths.
+// SEO note: served from gearuptofit.com (200 OK, same origin) — full link juice retained.
+const PROXIED_APPS = [
+  {
+    prefix: '/fitness-plan',
+    upstreamHost: 'body-recomp-os-guru.lovable.app',
+    title: '8-Week Training Plan | Gear Up To Fit',
+    description: 'Build your custom 8-week running and fitness plan. Science-backed programming personalized to your goals, pace, and experience.',
+  },
+  {
+    prefix: '/watch-match',
+    upstreamHost: 'wrist-wonderland-hub.lovable.app',
+    title: 'Watch Match — Find Your Perfect Sports Watch | Gear Up To Fit',
+    description: 'Match the right GPS / sports watch to your training. Honest, data-driven recommendations from Gear Up To Fit.',
+  },
+];
+
 const LOVABLE_ROUTES = [
   '/',
   '/fitness/',
@@ -17,6 +34,8 @@ const LOVABLE_ROUTES = [
   '/blog/',
   '/about/',
   '/contact/',
+  '/fitness-plan/',
+  '/watch-match/',
 ];
 
 function xmlResponse(body, init = {}) {
@@ -168,11 +187,202 @@ async function handleSitemap(pathname) {
   return null;
 }
 
+// ---------- Reverse proxy for embedded Lovable apps ----------
+
+function matchProxiedApp(pathname) {
+  for (const app of PROXIED_APPS) {
+    if (pathname === app.prefix || pathname === `${app.prefix}/` || pathname.startsWith(`${app.prefix}/`)) {
+      return app;
+    }
+  }
+  return null;
+}
+
+// Rewrite root-relative URLs in attributes so SPA assets resolve under the apex prefix.
+class AttrPrefixer {
+  constructor(attr, prefix) {
+    this.attr = attr;
+    this.prefix = prefix;
+  }
+  element(el) {
+    const v = el.getAttribute(this.attr);
+    if (!v) return;
+    // Only rewrite root-relative URLs (start with "/" but not "//" and not data:)
+    if (v.startsWith('/') && !v.startsWith('//')) {
+      el.setAttribute(this.attr, `${this.prefix}${v}`);
+    }
+  }
+}
+
+class CanonicalRewriter {
+  constructor(canonicalUrl) { this.canonicalUrl = canonicalUrl; }
+  element(el) {
+    const rel = (el.getAttribute('rel') || '').toLowerCase();
+    if (rel === 'canonical') el.setAttribute('href', this.canonicalUrl);
+  }
+}
+
+class MetaContentRewriter {
+  constructor(prefix, canonicalUrl) { this.prefix = prefix; this.canonicalUrl = canonicalUrl; }
+  element(el) {
+    const prop = (el.getAttribute('property') || el.getAttribute('name') || '').toLowerCase();
+    const content = el.getAttribute('content');
+    if (!content) return;
+    if (prop === 'og:url' || prop === 'twitter:url') {
+      el.setAttribute('content', this.canonicalUrl);
+      return;
+    }
+    if ((prop === 'og:image' || prop === 'twitter:image' || prop.endsWith(':image')) &&
+        content.startsWith('/') && !content.startsWith('//')) {
+      el.setAttribute('content', `https://${APEX_HOST}${this.prefix}${content}`);
+    }
+  }
+}
+
+class TitleRewriter {
+  constructor(title) { this.title = title; this.replaced = false; }
+  element() { /* set inner text via text handler */ }
+  text(t) {
+    if (this.replaced) { t.remove(); return; }
+    t.replace(this.title);
+    this.replaced = true;
+  }
+}
+
+class HeadInjector {
+  constructor(html) { this.html = html; this.injected = false; }
+  element(el) {
+    if (this.injected) return;
+    el.append(this.html, { html: true });
+    this.injected = true;
+  }
+}
+
+async function proxyApp(request, app) {
+  const url = new URL(request.url);
+  // Strip the apex prefix to derive the upstream path
+  let upstreamPath = url.pathname.slice(app.prefix.length) || '/';
+  if (!upstreamPath.startsWith('/')) upstreamPath = `/${upstreamPath}`;
+  const upstreamUrl = `https://${app.upstreamHost}${upstreamPath}${url.search}`;
+
+  // Pass through the request, but force Host + remove cookies that don't apply across origins.
+  const upstreamHeaders = new Headers(request.headers);
+  upstreamHeaders.set('host', app.upstreamHost);
+  upstreamHeaders.delete('cookie');
+  upstreamHeaders.set('x-forwarded-host', APEX_HOST);
+  upstreamHeaders.set('x-forwarded-proto', 'https');
+  upstreamHeaders.set('accept-encoding', 'gzip');
+
+  const upstreamReq = new Request(upstreamUrl, {
+    method: request.method,
+    headers: upstreamHeaders,
+    body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
+    redirect: 'manual',
+  });
+
+  let upstreamRes;
+  try {
+    upstreamRes = await fetch(upstreamReq, {
+      cf: { cacheTtl: 60, cacheEverything: false },
+    });
+  } catch (err) {
+    return new Response(`Upstream fetch failed: ${err.message}`, { status: 502 });
+  }
+
+  // Translate upstream redirects so they stay on the apex path.
+  if (upstreamRes.status >= 300 && upstreamRes.status < 400) {
+    const loc = upstreamRes.headers.get('location') || '';
+    let newLoc = loc;
+    if (loc.startsWith(`https://${app.upstreamHost}`)) {
+      newLoc = `https://${APEX_HOST}${app.prefix}${new URL(loc).pathname}${new URL(loc).search}`;
+    } else if (loc.startsWith('/')) {
+      newLoc = `${app.prefix}${loc}`;
+    }
+    const h = new Headers(upstreamRes.headers);
+    h.set('location', newLoc);
+    return new Response(null, { status: upstreamRes.status, headers: h });
+  }
+
+  const contentType = upstreamRes.headers.get('content-type') || '';
+  const resHeaders = new Headers(upstreamRes.headers);
+  // Strip upstream caching/security headers that conflict with our origin.
+  resHeaders.delete('content-security-policy');
+  resHeaders.delete('content-security-policy-report-only');
+  resHeaders.delete('x-frame-options');
+  resHeaders.delete('strict-transport-security');
+  // Re-set sensible cache headers
+  if (upstreamPath.startsWith('/assets/') || /\.(js|css|woff2?|png|jpe?g|svg|webp|ico|gif|map)$/i.test(upstreamPath)) {
+    resHeaders.set('cache-control', 'public, max-age=86400, s-maxage=86400');
+  } else {
+    resHeaders.set('cache-control', 'public, max-age=300, s-maxage=300');
+  }
+  resHeaders.set('x-proxied-from', app.upstreamHost);
+
+  if (!contentType.includes('text/html')) {
+    return new Response(upstreamRes.body, { status: upstreamRes.status, headers: resHeaders });
+  }
+
+  // HTML → rewrite root-relative URLs to live under app.prefix and inject SEO tags.
+  const canonicalUrl = `https://${APEX_HOST}${app.prefix}/`;
+  const headInjection = `
+    <link rel="canonical" href="${canonicalUrl}" data-apex-injected />
+    <meta property="og:url" content="${canonicalUrl}" data-apex-injected />
+    <meta name="robots" content="index,follow" data-apex-injected />
+  `;
+
+  const rewriter = new HTMLRewriter()
+    .on('a[href]', new AttrPrefixer('href', app.prefix))
+    .on('link[href]', new AttrPrefixer('href', app.prefix))
+    .on('script[src]', new AttrPrefixer('src', app.prefix))
+    .on('img[src]', new AttrPrefixer('src', app.prefix))
+    .on('img[srcset]', { element(el) {
+      const v = el.getAttribute('srcset'); if (!v) return;
+      const out = v.split(',').map(part => {
+        const seg = part.trim().split(/\s+/);
+        if (seg[0] && seg[0].startsWith('/') && !seg[0].startsWith('//')) seg[0] = `${app.prefix}${seg[0]}`;
+        return seg.join(' ');
+      }).join(', ');
+      el.setAttribute('srcset', out);
+    }})
+    .on('source[src]', new AttrPrefixer('src', app.prefix))
+    .on('source[srcset]', { element(el) {
+      const v = el.getAttribute('srcset'); if (!v) return;
+      const out = v.split(',').map(part => {
+        const seg = part.trim().split(/\s+/);
+        if (seg[0] && seg[0].startsWith('/') && !seg[0].startsWith('//')) seg[0] = `${app.prefix}${seg[0]}`;
+        return seg.join(' ');
+      }).join(', ');
+      el.setAttribute('srcset', out);
+    }})
+    .on('form[action]', new AttrPrefixer('action', app.prefix))
+    .on('use[href]', new AttrPrefixer('href', app.prefix))
+    .on('use[xlink:href]', new AttrPrefixer('xlink:href', app.prefix))
+    .on('link[rel="canonical"]', new CanonicalRewriter(canonicalUrl))
+    .on('meta', new MetaContentRewriter(app.prefix, canonicalUrl))
+    .on('title', new TitleRewriter(app.title))
+    .on('head', new HeadInjector(headInjection));
+
+  return rewriter.transform(new Response(upstreamRes.body, { status: upstreamRes.status, headers: resHeaders }));
+}
+
+// ---------- Entrypoint ----------
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
+
     const sitemap = await handleSitemap(url.pathname);
     if (sitemap) return sitemap;
+
+    // Bare prefix → redirect to trailing-slash form for SEO consistency.
+    for (const app of PROXIED_APPS) {
+      if (url.pathname === app.prefix) {
+        return Response.redirect(`https://${APEX_HOST}${app.prefix}/${url.search}`, 301);
+      }
+    }
+
+    const app = matchProxiedApp(url.pathname);
+    if (app) return proxyApp(request, app);
 
     return fetch(request);
   },

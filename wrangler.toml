@@ -8,5 +8,9 @@ routes = [
   { pattern = "gearuptofit.com/sitemap_index.xml", zone_name = "gearuptofit.com" },
   { pattern = "gearuptofit.com/sitemap-posts.xml", zone_name = "gearuptofit.com" },
   { pattern = "gearuptofit.com/sitemap-pages.xml", zone_name = "gearuptofit.com" },
-  { pattern = "gearuptofit.com/sitemap-lovable.xml", zone_name = "gearuptofit.com" }
+  { pattern = "gearuptofit.com/sitemap-lovable.xml", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/fitness-plan", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/fitness-plan/*", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/watch-match", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/watch-match/*", zone_name = "gearuptofit.com" }
 ]
