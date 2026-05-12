@@ -253,7 +253,8 @@ class HeadInjector {
   constructor(html) { this.html = html; this.injected = false; }
   element(el) {
     if (this.injected) return;
-    el.append(this.html, { html: true });
+    // Prepend so the router shim runs BEFORE the SPA's module scripts.
+    el.prepend(this.html, { html: true });
     this.injected = true;
   }
 }
