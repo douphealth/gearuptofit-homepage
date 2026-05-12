@@ -362,6 +362,19 @@ async function proxyApp(request, app) {
 
 // ---------- Entrypoint ----------
 
+// Map a `/assets/...` request that lost its apex prefix back to the right
+// proxied app, based on the Referer header. This rescues runtime dynamic
+// imports whose path strings are constructed by framework code we can't
+// safely rewrite (e.g. TSR's basepath-stripping in route preloads).
+function recoverAssetByReferer(url, request) {
+  if (!url.pathname.startsWith('/assets/')) return null;
+  const ref = request.headers.get('referer') || '';
+  for (const app of PROXIED_APPS) {
+    if (ref.includes(`${APEX_HOST}${app.prefix}`)) return app;
+  }
+  return null;
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -377,6 +390,15 @@ export default {
 
     const app = matchProxiedApp(url.pathname);
     if (app) return proxyApp(request, app);
+
+    const recovered = recoverAssetByReferer(url, request);
+    if (recovered) {
+      // Redirect to the prefixed asset so subsequent requests cache correctly.
+      return Response.redirect(
+        `https://${APEX_HOST}${recovered.prefix}${url.pathname}${url.search}`,
+        302,
+      );
+    }
 
     return fetch(request);
   },
