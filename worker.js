@@ -253,7 +253,8 @@ class HeadInjector {
   constructor(html) { this.html = html; this.injected = false; }
   element(el) {
     if (this.injected) return;
-    el.append(this.html, { html: true });
+    // Prepend so the router shim runs BEFORE the SPA's module scripts.
+    el.prepend(this.html, { html: true });
     this.injected = true;
   }
 }
@@ -322,12 +323,28 @@ async function proxyApp(request, app) {
     return new Response(upstreamRes.body, { status: upstreamRes.status, headers: resHeaders });
   }
 
-  // HTML → rewrite root-relative URLs and inject SEO tags.
+  // HTML → rewrite root-relative URLs and inject SEO tags + router basename shim.
   const canonicalUrl = `https://${APEX_HOST}${app.prefix}/`;
+  // SOTA shim: SPA was built with no basename, so React Router sees pathname
+  // "/fitness-plan/..." and renders 404. We transparently strip the prefix on
+  // every read of location.pathname/href, and re-add it on history writes —
+  // so the router thinks it's at "/", but the URL bar (and refresh / SEO /
+  // back button) keep the apex prefix intact.
+  const shim = `(function(){var P=${JSON.stringify(app.prefix)};
+function strip(p){if(p===P||p===P+"/")return "/";if(p.indexOf(P+"/")===0)return p.slice(P.length);return p;}
+function add(u){if(typeof u!=="string")return u;if(u.charAt(0)!=="/"||u.charAt(1)==="/")return u;if(u===P||u.indexOf(P+"/")===0)return u;return P+u;}
+try{var loc=window.location;var protoDesc=Object.getOwnPropertyDescriptor(Location.prototype,"pathname")||Object.getOwnPropertyDescriptor(Object.getPrototypeOf(loc),"pathname");
+var hrefDesc=Object.getOwnPropertyDescriptor(Location.prototype,"href")||Object.getOwnPropertyDescriptor(Object.getPrototypeOf(loc),"href");
+if(protoDesc&&protoDesc.get){Object.defineProperty(loc,"pathname",{configurable:true,get:function(){return strip(protoDesc.get.call(loc));},set:function(v){protoDesc.set.call(loc,add(v));}});}
+if(hrefDesc&&hrefDesc.get){Object.defineProperty(loc,"href",{configurable:true,get:function(){var h=hrefDesc.get.call(loc);try{var u=new URL(h);u.pathname=strip(u.pathname);return u.toString();}catch(e){return h;}},set:function(v){hrefDesc.set.call(loc,v);}});}}catch(e){}
+var _ps=history.pushState,_rs=history.replaceState;
+history.pushState=function(s,t,u){return _ps.call(history,s,t,add(u));};
+history.replaceState=function(s,t,u){return _rs.call(history,s,t,add(u));};})();`;
   const headInjection =
     `<link rel="canonical" href="${canonicalUrl}" data-apex-injected="1">` +
     `<meta property="og:url" content="${canonicalUrl}" data-apex-injected="1">` +
-    `<meta name="robots" content="index,follow,max-image-preview:large" data-apex-injected="1">`;
+    `<meta name="robots" content="index,follow,max-image-preview:large" data-apex-injected="1">` +
+    `<script data-apex-injected="1">${shim}</script>`;
 
   const srcsetHandler = {
     element(el) {
