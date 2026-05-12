@@ -239,19 +239,15 @@ class HeadInjector {
   }
 }
 
-async function fetchUpstream(request, app, upstreamUrl) {
-  const upstreamHeaders = new Headers();
-  for (const h of ['accept', 'user-agent', 'accept-language', 'range', 'if-none-match', 'if-modified-since']) {
-    const v = request.headers.get(h);
-    if (v) upstreamHeaders.set(h, v);
-  }
-  upstreamHeaders.set('x-forwarded-host', APEX_HOST);
-  upstreamHeaders.set('x-forwarded-proto', 'https');
+async function fetchUpstream(_request, _app, upstreamUrl) {
   return fetch(upstreamUrl, {
-    method: request.method,
-    headers: upstreamHeaders,
+    method: 'GET',
+    headers: {
+      accept: '*/*',
+      'user-agent': 'GearUpToFit-Apex-Proxy/1.0 (+https://gearuptofit.com)',
+      'accept-encoding': 'gzip',
+    },
     redirect: 'manual',
-    cf: { cacheTtl: 60, cacheEverything: false },
   });
 }
 
@@ -300,8 +296,19 @@ async function proxyApp(request, app) {
     /\.(?:js|mjs|json)$/i.test(upstreamPath);
   if (isJs) {
     let text = await upstreamRes.text();
+    const upstreamStatus = upstreamRes.status;
+    const upstreamCT = upstreamRes.headers.get('content-type') || '';
+    const beforeLen = text.length;
+    const before = (text.match(/\/assets\//g) || []).length;
     text = rewriteAssetStringsInText(text, app.prefix);
-    if (app.framework === 'react-router') text = patchReactRouterPathname(text, app.prefix);
+    const after = (text.match(new RegExp(`${app.prefix.replace(/[/]/g, '\\/')}/assets/`, 'g')) || []).length;
+    let routerPatched = 0;
+    if (app.framework === 'react-router') {
+      const t2 = patchReactRouterPathname(text, app.prefix);
+      routerPatched = t2 === text ? 0 : 1;
+      text = t2;
+    }
+    resHeaders.set('x-rewrite', `s=${upstreamStatus};ct=${upstreamCT.slice(0,20)};len=${beforeLen};before=${before};after=${after};router=${routerPatched}`);
     return new Response(text, { status: upstreamRes.status, headers: resHeaders });
   }
 
