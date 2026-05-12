@@ -239,23 +239,15 @@ class HeadInjector {
   }
 }
 
-async function fetchUpstream(request, app, upstreamUrl) {
-  // We deliberately do NOT forward conditional headers (if-none-match,
-  // if-modified-since): a 304 from upstream returns an empty body and would
-  // break our text-rewrite step.
-  const upstreamHeaders = new Headers();
-  for (const h of ['accept', 'user-agent', 'accept-language']) {
-    const v = request.headers.get(h);
-    if (v) upstreamHeaders.set(h, v);
-  }
-  upstreamHeaders.set('x-forwarded-host', APEX_HOST);
-  upstreamHeaders.set('x-forwarded-proto', 'https');
-  upstreamHeaders.set('accept-encoding', 'identity');
+async function fetchUpstream(_request, _app, upstreamUrl) {
   return fetch(upstreamUrl, {
-    method: request.method,
-    headers: upstreamHeaders,
+    method: 'GET',
+    headers: {
+      accept: '*/*',
+      'user-agent': 'GearUpToFit-Apex-Proxy/1.0 (+https://gearuptofit.com)',
+      'accept-encoding': 'gzip',
+    },
     redirect: 'manual',
-    cf: { cacheTtl: 0, cacheEverything: false },
   });
 }
 
