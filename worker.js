@@ -304,6 +304,8 @@ async function proxyApp(request, app) {
     /\.(?:js|mjs|json)$/i.test(upstreamPath);
   if (isJs) {
     let text = await upstreamRes.text();
+    const upstreamStatus = upstreamRes.status;
+    const upstreamCT = upstreamRes.headers.get('content-type') || '';
     const beforeLen = text.length;
     const before = (text.match(/\/assets\//g) || []).length;
     text = rewriteAssetStringsInText(text, app.prefix);
@@ -314,7 +316,7 @@ async function proxyApp(request, app) {
       routerPatched = t2 === text ? 0 : 1;
       text = t2;
     }
-    resHeaders.set('x-rewrite', `len=${beforeLen};assetsBefore=${before};assetsAfter=${after};router=${routerPatched}`);
+    resHeaders.set('x-rewrite', `s=${upstreamStatus};ct=${upstreamCT.slice(0,20)};len=${beforeLen};before=${before};after=${after};router=${routerPatched}`);
     return new Response(text, { status: upstreamRes.status, headers: resHeaders });
   }
 
