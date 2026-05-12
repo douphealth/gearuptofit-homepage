@@ -157,13 +157,49 @@ for (const pattern of desiredRoutes) {
   }
 }
 
-// --- Verify sitemap is still healthy ---
-const sitemapCheck = spawnSync('curl', ['-fsSI', `https://${zoneName}/sitemap-posts.xml`], { encoding: 'utf8' });
-if (sitemapCheck.status !== 0) {
-  console.error(sitemapCheck.stderr || 'Sitemap verification failed.');
-  process.exit(sitemapCheck.status ?? 1);
+// --- Post-deploy smoke tests: hard-fail if any critical surface regresses. ---
+// These are the contract every deploy MUST satisfy. If any check fails, this
+// script exits non-zero so a regression cannot silently reach production.
+async function head(url) {
+  const r = await fetch(url, { method: 'GET', redirect: 'manual' });
+  return { status: r.status, headers: r.headers, ct: r.headers.get('content-type') || '' };
 }
-const urlCount = sitemapCheck.stdout
-  .split('\n')
-  .find((line) => line.toLowerCase().startsWith('x-url-count:'));
-console.log(urlCount ? urlCount.trim() : 'sitemap OK');
+
+async function expect(label, url, predicate) {
+  try {
+    const res = await head(url);
+    const ok = predicate(res);
+    console.log(`  ${ok ? '✔' : '✘'} ${label}  [${res.status} ${res.ct.split(';')[0]}]  ${url}`);
+    return ok;
+  } catch (err) {
+    console.log(`  ✘ ${label}  [ERROR ${err.message}]  ${url}`);
+    return false;
+  }
+}
+
+console.log('\nSmoke tests:');
+const apexHomeRes = await fetch(`https://${zoneName}/`);
+const apexHomeHtml = await apexHomeRes.text();
+const assetMatch = apexHomeHtml.match(/\/assets\/[A-Za-z0-9_.-]+\.(?:js|css)/g) || [];
+
+const checks = await Promise.all([
+  expect('apex homepage 200 + html', `https://${zoneName}/`, (r) => r.status === 200 && r.ct.includes('text/html')),
+  ...assetMatch.slice(0, 4).map((a) =>
+    expect(`apex asset 200 ${a}`, `https://${zoneName}${a}`, (r) => r.status === 200 && (r.ct.includes('javascript') || r.ct.includes('css'))),
+  ),
+  expect('/fitness-plan/ proxied 200', `https://${zoneName}/fitness-plan/`, (r) => r.status === 200 && r.headers.get('x-proxied-from')),
+  expect('/watch-match/ proxied 200', `https://${zoneName}/watch-match/`, (r) => r.status === 200 && r.headers.get('x-proxied-from')),
+  expect('sitemap-posts.xml has urls', `https://${zoneName}/sitemap-posts.xml`, (r) => r.status === 200 && Number(r.headers.get('x-url-count') || 0) > 100),
+  expect('sitemap-pages.xml ok', `https://${zoneName}/sitemap-pages.xml`, (r) => r.status === 200),
+  expect('sitemap-lovable.xml ok', `https://${zoneName}/sitemap-lovable.xml`, (r) => r.status === 200),
+  expect('/~api/analytics 204 no-op', `https://${zoneName}/~api/analytics`, (r) => r.status === 204),
+  // Guardrail: bare /assets/* requests on the apex MUST go to the Lovable SPA,
+  // not to the worker. We assert by confirming there is NO x-proxied-from header.
+  expect('apex /assets/* not hijacked', `https://${zoneName}/assets/index-CTzGmr15.css`, (r) => !r.headers.get('x-proxied-from')),
+]);
+
+if (checks.some((ok) => !ok)) {
+  console.error('\n✘ One or more smoke tests failed. Investigate before considering this deploy healthy.');
+  process.exit(1);
+}
+console.log('\n✔ All smoke tests passed.');
