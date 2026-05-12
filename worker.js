@@ -393,11 +393,15 @@ export default {
 
     const recovered = recoverAssetByReferer(url, request);
     if (recovered) {
-      // Redirect to the prefixed asset so subsequent requests cache correctly.
-      return Response.redirect(
-        `https://${APEX_HOST}${recovered.prefix}${url.pathname}${url.search}`,
-        302,
-      );
+      // Serve directly instead of redirecting: modulepreload requests can emit
+      // noisy console 404s before the browser follows the redirect.
+      return proxyApp(new Request(`https://${APEX_HOST}${recovered.prefix}${url.pathname}${url.search}`, request), recovered);
+    }
+
+    // Lovable badge analytics endpoint does not exist on the apex domain; make
+    // it a clean no-op so production consoles stay error-free.
+    if (url.pathname === '/~api/analytics') {
+      return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
     }
 
     return fetch(request);
