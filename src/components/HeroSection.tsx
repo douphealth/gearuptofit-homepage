@@ -58,13 +58,23 @@ const HeroSection = () => {
                 <ArrowRight className="w-5 h-5" />
               </a>
               <a
-                href="https://fitness-plan.gearuptofit.com/"
+                href="https://gearuptofit.com/fitness-plan/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center justify-center gap-2 px-8 py-4 border border-primary/50 font-display text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
               >
                 <span className="hidden sm:inline">8-Week Training Plan</span>
                 <span className="sm:hidden">Training Plan</span>
+              </a>
+              <a
+                href="https://gearuptofit.com/watch-match/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2 px-8 py-4 border border-primary/50 font-display text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
+              >
+                <span className="hidden sm:inline">Watch Match</span>
+                <span className="sm:hidden">Watch Match</span>
+                <ArrowRight className="w-5 h-5" />
               </a>
             </div>
             

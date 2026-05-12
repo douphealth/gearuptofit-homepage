@@ -36,7 +36,7 @@ const CTASection = () => {
               <ArrowRight className="w-5 h-5" />
             </a>
             <a
-              href="https://fitness-plan.gearuptofit.com/"
+              href="https://gearuptofit.com/fitness-plan/"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-2 px-10 py-5 border border-primary/50 font-display text-xl uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"

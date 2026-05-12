@@ -101,8 +101,12 @@ const SiteHeader = () => {
                   className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-primary font-display text-xs uppercase tracking-widest font-bold rounded-sm text-primary-foreground">
                   Shoe Finder
                 </a>
-                <a href="https://fitness-plan.gearuptofit.com/" target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 w-full px-4 py-3 border border-primary/50 font-display text-xs uppercase tracking-widest font-bold rounded-sm text-primary hover:bg-primary/10">
+                <a href="https://gearuptofit.com/watch-match/" target="_blank" rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-primary font-display text-xs uppercase tracking-widest font-bold rounded-sm text-primary-foreground">
+                  Watch Match
+                </a>
+                <a href="https://gearuptofit.com/fitness-plan/" target="_blank" rel="noopener noreferrer"
+                  className="col-span-2 flex items-center justify-center gap-2 w-full px-4 py-3 border border-primary/50 font-display text-xs uppercase tracking-widest font-bold rounded-sm text-primary hover:bg-primary/10">
                   Training Plan
                 </a>
               </div>
