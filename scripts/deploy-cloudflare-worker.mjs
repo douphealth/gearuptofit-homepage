@@ -107,6 +107,7 @@ const desiredRoutes = [
   '/watch-match',
   '/watch-match/*',
   '/assets/*',
+  '/~api/analytics',
 ].map((p) => `${zoneName}${p}`);
 
 const existingRes = await jget(
