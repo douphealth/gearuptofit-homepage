@@ -121,8 +121,26 @@ const existing = existingRes.result || [];
 const existingForScript = existing.filter((r) => r.script === scriptName);
 const existingPatterns = new Set(existingForScript.map((r) => r.pattern));
 
+// Delete any forbidden routes we previously created (e.g. the global /assets/*
+// route that was breaking the apex SPA's bundle loading).
+for (const route of existingForScript) {
+  if (!forbiddenPatterns.has(route.pattern)) continue;
+  const r = await fetch(
+    `https://api.cloudflare.com/client/v4/zones/${zoneId}/workers/routes/${route.id}`,
+    { method: 'DELETE', headers: authHeaders },
+  );
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.success) {
+    console.warn('  route delete failed:', route.pattern, JSON.stringify(j.errors || j));
+  } else {
+    console.log('  - route', route.pattern);
+    existingPatterns.delete(route.pattern);
+  }
+}
+
 for (const pattern of desiredRoutes) {
   if (existingPatterns.has(pattern)) continue;
+  if (forbiddenPatterns.has(pattern)) continue;
   const r = await fetch(
     `https://api.cloudflare.com/client/v4/zones/${zoneId}/workers/routes`,
     {
