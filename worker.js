@@ -26,10 +26,17 @@ const PROXIED_APPS = [
   },
 ];
 
+// Only routes that actually return 200 from the apex (verified). Routes that
+// 301 to WordPress (e.g. /fitness/, /running/, /nutrition/, /health/, /review/,
+// /weight-loss/, /about/, /contact/) MUST NOT be advertised in the sitemap —
+// submitting redirects kills crawl budget and dilutes topical authority.
 const LOVABLE_ROUTES = [
-  '/', '/fitness/', '/running/', '/nutrition/', '/health/', '/weight-loss/',
-  '/review/', '/shoe-match/', '/blog/', '/about/', '/contact/',
-  '/fitness-plan/', '/watch-match/',
+  '/',
+  '/shoe-match/',
+  '/blog/',
+  '/calculators/',
+  '/fitness-plan/',
+  '/watch-match/',
 ];
 
 // ---------- sitemap helpers (unchanged) ----------
