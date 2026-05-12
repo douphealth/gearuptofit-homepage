@@ -391,12 +391,9 @@ export default {
     const app = matchProxiedApp(url.pathname);
     if (app) return proxyApp(request, app);
 
-    const recovered = recoverAssetByReferer(url, request);
-    if (recovered) {
-      // Serve directly instead of redirecting: modulepreload requests can emit
-      // noisy console 404s before the browser follows the redirect.
-      return proxyApp(new Request(`https://${APEX_HOST}${recovered.prefix}${url.pathname}${url.search}`, request), recovered);
-    }
+    // NOTE: do NOT recover bare /assets/* by referer. The apex domain itself
+    // is a Lovable SPA whose bundles live at /assets/*; intercepting that path
+    // broke the homepage. Proxied apps get their assets prefixed at source.
 
     // Lovable badge analytics endpoint does not exist on the apex domain; make
     // it a clean no-op so production consoles stay error-free.
