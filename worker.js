@@ -313,6 +313,10 @@ async function proxyApp(request, app) {
       const t2 = patchReactRouterPathname(text, app.prefix);
       routerPatched = t2 === text ? 0 : 1;
       text = t2;
+    } else if (app.framework === 'tanstack-start') {
+      const t2 = patchTanstackBasepath(text, app.prefix);
+      routerPatched = t2 === text ? 0 : 1;
+      text = t2;
     }
     resHeaders.set('x-rewrite', `s=${upstreamStatus};ct=${upstreamCT.slice(0,20)};len=${beforeLen};before=${before};after=${after};router=${routerPatched}`);
     return new Response(text, { status: upstreamRes.status, headers: resHeaders });
