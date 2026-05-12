@@ -300,8 +300,17 @@ async function proxyApp(request, app) {
     /\.(?:js|mjs|json)$/i.test(upstreamPath);
   if (isJs) {
     let text = await upstreamRes.text();
+    const beforeLen = text.length;
+    const before = (text.match(/\/assets\//g) || []).length;
     text = rewriteAssetStringsInText(text, app.prefix);
-    if (app.framework === 'react-router') text = patchReactRouterPathname(text, app.prefix);
+    const after = (text.match(new RegExp(`${app.prefix.replace(/[/]/g, '\\/')}/assets/`, 'g')) || []).length;
+    let routerPatched = 0;
+    if (app.framework === 'react-router') {
+      const t2 = patchReactRouterPathname(text, app.prefix);
+      routerPatched = t2 === text ? 0 : 1;
+      text = t2;
+    }
+    resHeaders.set('x-rewrite', `len=${beforeLen};assetsBefore=${before};assetsAfter=${after};router=${routerPatched}`);
     return new Response(text, { status: upstreamRes.status, headers: resHeaders });
   }
 
