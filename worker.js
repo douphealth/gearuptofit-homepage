@@ -6,37 +6,33 @@ const MAX_REST_PAGES = 50;
 const AUTHORITATIVE_POST_SITEMAPS = ['/post-sitemap.xml', '/post-sitemap2.xml'];
 
 // Reverse-proxied Lovable apps mounted under apex paths.
-// SEO note: served from gearuptofit.com (200 OK, same origin) — full link juice retained.
+// Both upstream apps were built with Vite base "/" and have no router basename,
+// so the worker must transparently rewrite all `/assets/...` references and
+// (for React Router) strip the apex prefix from the initial location read.
 const PROXIED_APPS = [
   {
     prefix: '/fitness-plan',
     upstreamHost: 'body-recomp-os-guru.lovable.app',
     title: '8-Week Training Plan | Gear Up To Fit',
     description: 'Build your custom 8-week running and fitness plan. Science-backed programming personalized to your goals, pace, and experience.',
+    framework: 'react-router',
   },
   {
     prefix: '/watch-match',
     upstreamHost: 'wrist-wonderland-hub.lovable.app',
     title: 'Watch Match — Find Your Perfect Sports Watch | Gear Up To Fit',
     description: 'Match the right GPS / sports watch to your training. Honest, data-driven recommendations from Gear Up To Fit.',
+    framework: 'tanstack-start',
   },
 ];
 
 const LOVABLE_ROUTES = [
-  '/',
-  '/fitness/',
-  '/running/',
-  '/nutrition/',
-  '/health/',
-  '/weight-loss/',
-  '/review/',
-  '/shoe-match/',
-  '/blog/',
-  '/about/',
-  '/contact/',
-  '/fitness-plan/',
-  '/watch-match/',
+  '/', '/fitness/', '/running/', '/nutrition/', '/health/', '/weight-loss/',
+  '/review/', '/shoe-match/', '/blog/', '/about/', '/contact/',
+  '/fitness-plan/', '/watch-match/',
 ];
+
+// ---------- sitemap helpers (unchanged) ----------
 
 function xmlResponse(body, init = {}) {
   return new Response(body, {
@@ -48,16 +44,10 @@ function xmlResponse(body, init = {}) {
     },
   });
 }
-
-function escapeXml(value = '') {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
+function escapeXml(v = '') {
+  return String(v).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
 }
-
 function normalizeApexUrl(value) {
   if (!value) return '';
   let url = String(value).replaceAll(`https://${ORIGIN_HOST}`, `https://${APEX_HOST}`);
@@ -65,7 +55,6 @@ function normalizeApexUrl(value) {
   url = url.replace(/^http:\/\/gearuptofit\.com/i, `https://${APEX_HOST}`);
   return url;
 }
-
 function lastmodFrom(item) {
   const raw = item.modified_gmt || item.modified || item.date_gmt || item.date;
   if (!raw) return '';
@@ -73,7 +62,6 @@ function lastmodFrom(item) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : d.toISOString();
 }
-
 async function fetchOriginXml(pathname) {
   const res = await fetch(`${ORIGIN_BASE}${pathname}`, {
     headers: { accept: 'application/xml,text/xml', 'user-agent': 'GearUpToFit sitemap worker' },
@@ -82,7 +70,6 @@ async function fetchOriginXml(pathname) {
   if (!res.ok) throw new Error(`Origin sitemap ${pathname} failed: ${res.status}`);
   return res.text();
 }
-
 function parseUrlsetXml(xml) {
   const entries = [];
   const blocks = xml.match(/<url[\s\S]*?<\/url>/gi) || [];
@@ -94,21 +81,17 @@ function parseUrlsetXml(xml) {
   }
   return entries;
 }
-
 async function fetchAuthoritativePostSitemapItems() {
-  const seen = new Set();
-  const items = [];
+  const seen = new Set(), items = [];
   for (const path of AUTHORITATIVE_POST_SITEMAPS) {
     const xml = await fetchOriginXml(path);
     for (const item of parseUrlsetXml(xml)) {
       if (seen.has(item.loc)) continue;
-      seen.add(item.loc);
-      items.push(item);
+      seen.add(item.loc); items.push(item);
     }
   }
   return items;
 }
-
 async function fetchAllFromRest(type) {
   const all = [];
   for (let page = 1; page <= MAX_REST_PAGES; page += 1) {
@@ -117,135 +100,133 @@ async function fetchAllFromRest(type) {
       headers: { accept: 'application/json', 'user-agent': 'GearUpToFit sitemap worker' },
       cf: { cacheTtl: SITEMAP_TTL, cacheEverything: true },
     });
-
     if (res.status === 400 && page > 1) break;
     if (!res.ok) throw new Error(`REST ${type} failed: ${res.status}`);
-
     const items = await res.json();
     if (!Array.isArray(items) || items.length === 0) break;
     all.push(...items);
-
     const totalPages = Number(res.headers.get('x-wp-totalpages') || 0);
     if (totalPages && page >= totalPages) break;
     if (items.length < 100) break;
   }
   return all;
 }
-
 function buildUrlset(items) {
-  const urls = items
-    .map((item) => {
-      const loc = normalizeApexUrl(item.link || item.loc);
-      if (!loc || !loc.startsWith(`https://${APEX_HOST}/`)) return '';
-      const lastmod = lastmodFrom(item);
-      return [
-        '  <url>',
-        `    <loc>${escapeXml(loc)}</loc>`,
-        lastmod ? `    <lastmod>${escapeXml(lastmod)}</lastmod>` : '',
-        '  </url>',
-      ].filter(Boolean).join('\n');
-    })
-    .filter(Boolean)
-    .join('\n');
-
+  const urls = items.map((item) => {
+    const loc = normalizeApexUrl(item.link || item.loc);
+    if (!loc || !loc.startsWith(`https://${APEX_HOST}/`)) return '';
+    const lastmod = lastmodFrom(item);
+    return ['  <url>', `    <loc>${escapeXml(loc)}</loc>`,
+      lastmod ? `    <lastmod>${escapeXml(lastmod)}</lastmod>` : '', '  </url>']
+      .filter(Boolean).join('\n');
+  }).filter(Boolean).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`;
 }
-
 function buildSitemapIndex() {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <sitemap><loc>https://${APEX_HOST}/post-sitemap.xml</loc></sitemap>\n  <sitemap><loc>https://${APEX_HOST}/post-sitemap2.xml</loc></sitemap>\n  <sitemap><loc>https://${APEX_HOST}/sitemap-pages.xml</loc></sitemap>\n  <sitemap><loc>https://${APEX_HOST}/sitemap-lovable.xml</loc></sitemap>\n</sitemapindex>`;
 }
-
 function buildLovableSitemap() {
-  return buildUrlset(LOVABLE_ROUTES.map((path) => ({ loc: `https://${APEX_HOST}${path}` })));
+  return buildUrlset(LOVABLE_ROUTES.map((p) => ({ loc: `https://${APEX_HOST}${p}` })));
 }
-
 async function handleSitemap(pathname) {
   if (pathname === '/sitemap.xml' || pathname === '/sitemap_index.xml') {
     return xmlResponse(buildSitemapIndex(), { headers: { 'x-sitemap-source': 'worker-index' } });
   }
-
   if (pathname === '/sitemap-posts.xml') {
     const posts = await fetchAuthoritativePostSitemapItems();
-    return xmlResponse(buildUrlset(posts), {
-      headers: { 'x-sitemap-source': 'wp-authoritative-post-sitemaps', 'x-url-count': String(posts.length) },
-    });
+    return xmlResponse(buildUrlset(posts), { headers: { 'x-sitemap-source': 'wp-authoritative-post-sitemaps', 'x-url-count': String(posts.length) } });
   }
-
   if (pathname === '/sitemap-pages.xml') {
     const pages = await fetchAllFromRest('pages');
-    return xmlResponse(buildUrlset(pages), {
-      headers: { 'x-sitemap-source': 'wp-rest-pages', 'x-url-count': String(pages.length) },
-    });
+    return xmlResponse(buildUrlset(pages), { headers: { 'x-sitemap-source': 'wp-rest-pages', 'x-url-count': String(pages.length) } });
   }
-
   if (pathname === '/sitemap-lovable.xml') {
-    return xmlResponse(buildLovableSitemap(), {
-      headers: { 'x-sitemap-source': 'lovable-routes', 'x-url-count': String(LOVABLE_ROUTES.length) },
-    });
+    return xmlResponse(buildLovableSitemap(), { headers: { 'x-sitemap-source': 'lovable-routes', 'x-url-count': String(LOVABLE_ROUTES.length) } });
   }
-
   return null;
 }
 
-// ---------- Reverse proxy for embedded Lovable apps ----------
+// ---------- reverse proxy ----------
 
 function matchProxiedApp(pathname) {
   for (const app of PROXIED_APPS) {
-    if (pathname === app.prefix || pathname === `${app.prefix}/` || pathname.startsWith(`${app.prefix}/`)) {
-      return app;
-    }
+    if (pathname === app.prefix || pathname === `${app.prefix}/` || pathname.startsWith(`${app.prefix}/`)) return app;
   }
   return null;
 }
 
-// Rewrite root-relative URLs in attributes so SPA assets resolve under the apex prefix.
+// Add prefix to a root-relative path; idempotent (won't double-prefix).
+function addPrefix(value, prefix) {
+  if (!value || typeof value !== 'string') return value;
+  if (!value.startsWith('/') || value.startsWith('//')) return value;
+  if (value === prefix || value.startsWith(`${prefix}/`)) return value;
+  return `${prefix}${value}`;
+}
+
+// Rewrite every "/assets/..." (and other known root-absolute asset roots) inside
+// arbitrary text (inline JS, JSON manifests, JS bundles). Idempotent.
+const ASSET_ROOT_RE = /(["'`(=,\s])(\/(?:assets|static|images|img|fonts|icons|locales|public|build|chunks)\/)/g;
+function rewriteAssetStringsInText(text, prefix) {
+  if (!text) return text;
+  return text.replace(ASSET_ROOT_RE, (m, lead, path) => {
+    if (path.startsWith(`${prefix}/`)) return m;
+    return `${lead}${prefix}${path}`;
+  });
+}
+
+// React Router 6 surgical patch — strip the apex prefix from the initial
+// location read inside createBrowserHistory(), so <Routes> matches `/`.
+function patchReactRouterPathname(text, prefix) {
+  // Minified pattern: `let{pathname:o,search:a,hash:s}=n.location;`
+  // We accept any single-letter identifiers.
+  return text.replace(
+    /let\{pathname:([a-zA-Z_$]),search:([a-zA-Z_$]),hash:([a-zA-Z_$])\}=([a-zA-Z_$]+)\.location;/g,
+    (_m, p, s, h, n) =>
+      `let{pathname:${p},search:${s},hash:${h}}=${n}.location;` +
+      `${p}=(${p}.indexOf(${JSON.stringify(prefix + '/')})===0?${p}.slice(${prefix.length})||"/":${p}===${JSON.stringify(prefix)}?"/":${p});`,
+  );
+}
+
 class AttrPrefixer {
-  constructor(attr, prefix) {
-    this.attr = attr;
-    this.prefix = prefix;
-  }
+  constructor(attr, prefix) { this.attr = attr; this.prefix = prefix; }
   element(el) {
     const v = el.getAttribute(this.attr);
     if (!v) return;
-    // Only rewrite root-relative URLs (start with "/" but not "//" and not data:)
-    if (v.startsWith('/') && !v.startsWith('//')) {
-      el.setAttribute(this.attr, `${this.prefix}${v}`);
-    }
+    const next = addPrefix(v, this.prefix);
+    if (next !== v) el.setAttribute(this.attr, next);
   }
 }
 
-class CanonicalRewriter {
-  constructor(canonicalUrl) { this.canonicalUrl = canonicalUrl; }
+class SrcsetPrefixer {
+  constructor(prefix) { this.prefix = prefix; }
   element(el) {
-    const rel = (el.getAttribute('rel') || '').toLowerCase();
-    if (rel === 'canonical') el.setAttribute('href', this.canonicalUrl);
+    const v = el.getAttribute('srcset');
+    if (!v) return;
+    const out = v.split(',').map((part) => {
+      const seg = part.trim().split(/\s+/);
+      seg[0] = addPrefix(seg[0], this.prefix);
+      return seg.join(' ');
+    }).join(', ');
+    if (out !== v) el.setAttribute('srcset', out);
   }
 }
 
-class MetaContentRewriter {
-  constructor(prefix, canonicalUrl) { this.prefix = prefix; this.canonicalUrl = canonicalUrl; }
+// Buffer text inside specific elements (script/style) and rewrite asset paths.
+class TextContentRewriter {
+  constructor(prefix) { this.prefix = prefix; this.buffer = ''; }
   element(el) {
-    const prop = (el.getAttribute('property') || el.getAttribute('name') || '').toLowerCase();
-    const content = el.getAttribute('content');
-    if (!content) return;
-    if (prop === 'og:url' || prop === 'twitter:url') {
-      el.setAttribute('content', this.canonicalUrl);
-      return;
-    }
-    if ((prop === 'og:image' || prop === 'twitter:image' || prop.endsWith(':image')) &&
-        content.startsWith('/') && !content.startsWith('//')) {
-      el.setAttribute('content', `https://${APEX_HOST}${this.prefix}${content}`);
-    }
+    this.buffer = '';
+    el.onEndTag(() => { /* handled per-text below */ });
   }
-}
-
-class TitleRewriter {
-  constructor(title) { this.title = title; this.replaced = false; }
-  element() { /* set inner text via text handler */ }
   text(t) {
-    if (this.replaced) { t.remove(); return; }
-    t.replace(this.title);
-    this.replaced = true;
+    this.buffer += t.text;
+    if (t.lastInTextNode) {
+      const out = rewriteAssetStringsInText(this.buffer, this.prefix);
+      t.replace(out, { html: false });
+      this.buffer = '';
+    } else {
+      t.remove();
+    }
   }
 }
 
@@ -253,10 +234,25 @@ class HeadInjector {
   constructor(html) { this.html = html; this.injected = false; }
   element(el) {
     if (this.injected) return;
-    // Prepend so the router shim runs BEFORE the SPA's module scripts.
     el.prepend(this.html, { html: true });
     this.injected = true;
   }
+}
+
+async function fetchUpstream(request, app, upstreamUrl) {
+  const upstreamHeaders = new Headers();
+  for (const h of ['accept', 'user-agent', 'accept-language', 'range', 'if-none-match', 'if-modified-since']) {
+    const v = request.headers.get(h);
+    if (v) upstreamHeaders.set(h, v);
+  }
+  upstreamHeaders.set('x-forwarded-host', APEX_HOST);
+  upstreamHeaders.set('x-forwarded-proto', 'https');
+  return fetch(upstreamUrl, {
+    method: request.method,
+    headers: upstreamHeaders,
+    redirect: 'manual',
+    cf: { cacheTtl: 60, cacheEverything: false },
+  });
 }
 
 async function proxyApp(request, app) {
@@ -265,31 +261,13 @@ async function proxyApp(request, app) {
   if (!upstreamPath.startsWith('/')) upstreamPath = `/${upstreamPath}`;
   const upstreamUrl = `https://${app.upstreamHost}${upstreamPath}${url.search}`;
 
-  // Build a clean request — do NOT clone the original headers (they include
-  // host/cookie/cf-* that Cloudflare forbids modifying inside Workers).
-  const upstreamHeaders = new Headers();
-  const accept = request.headers.get('accept');
-  const ua = request.headers.get('user-agent');
-  const lang = request.headers.get('accept-language');
-  if (accept) upstreamHeaders.set('accept', accept);
-  if (ua) upstreamHeaders.set('user-agent', ua);
-  if (lang) upstreamHeaders.set('accept-language', lang);
-  upstreamHeaders.set('x-forwarded-host', APEX_HOST);
-  upstreamHeaders.set('x-forwarded-proto', 'https');
-
   let upstreamRes;
   try {
-    upstreamRes = await fetch(upstreamUrl, {
-      method: request.method,
-      headers: upstreamHeaders,
-      redirect: 'manual',
-      cf: { cacheTtl: 60, cacheEverything: false },
-    });
+    upstreamRes = await fetchUpstream(request, app, upstreamUrl);
   } catch (err) {
     return new Response(`Upstream fetch failed: ${err.message}`, { status: 502 });
   }
 
-  // Translate upstream redirects so they stay on the apex path.
   if (upstreamRes.status >= 300 && upstreamRes.status < 400) {
     const loc = upstreamRes.headers.get('location') || '';
     let newLoc = loc;
@@ -298,7 +276,7 @@ async function proxyApp(request, app) {
         const parsed = new URL(loc);
         newLoc = `https://${APEX_HOST}${app.prefix}${parsed.pathname}${parsed.search}`;
       } else if (loc.startsWith('/')) {
-        newLoc = `${app.prefix}${loc}`;
+        newLoc = addPrefix(loc, app.prefix);
       }
     } catch { /* ignore */ }
     return new Response(null, {
@@ -308,7 +286,6 @@ async function proxyApp(request, app) {
   }
 
   const contentType = upstreamRes.headers.get('content-type') || '';
-  // Build a fresh response headers map (avoid CF-managed headers from upstream).
   const resHeaders = new Headers();
   resHeaders.set('content-type', contentType || 'application/octet-stream');
   resHeaders.set('x-proxied-from', app.upstreamHost);
@@ -318,65 +295,52 @@ async function proxyApp(request, app) {
     resHeaders.set('cache-control', 'public, max-age=120, s-maxage=120');
   }
 
-  // Non-HTML → stream through unchanged.
+  // ---- JS / JSON: text rewrite for asset paths and (React Router) pathname patch.
+  const isJs = /\b(?:javascript|ecmascript|json)\b/i.test(contentType) ||
+    /\.(?:js|mjs|json)$/i.test(upstreamPath);
+  if (isJs) {
+    let text = await upstreamRes.text();
+    text = rewriteAssetStringsInText(text, app.prefix);
+    if (app.framework === 'react-router') text = patchReactRouterPathname(text, app.prefix);
+    return new Response(text, { status: upstreamRes.status, headers: resHeaders });
+  }
+
+  // ---- Non-HTML, non-JS → stream through unchanged.
   if (!contentType.includes('text/html')) {
     return new Response(upstreamRes.body, { status: upstreamRes.status, headers: resHeaders });
   }
 
-  // HTML → rewrite root-relative URLs and inject SEO tags + router basename shim.
+  // ---- HTML → buffer, run HTMLRewriter, then text-rewrite inline scripts.
   const canonicalUrl = `https://${APEX_HOST}${app.prefix}/`;
-  // SOTA shim: SPA was built with no basename, so React Router sees pathname
-  // "/fitness-plan/..." and renders 404. We transparently strip the prefix on
-  // every read of location.pathname/href, and re-add it on history writes —
-  // so the router thinks it's at "/", but the URL bar (and refresh / SEO /
-  // back button) keep the apex prefix intact.
-  const shim = `(function(){var P=${JSON.stringify(app.prefix)};
-function strip(p){if(p===P||p===P+"/")return "/";if(p.indexOf(P+"/")===0)return p.slice(P.length);return p;}
-function add(u){if(typeof u!=="string")return u;if(u.charAt(0)!=="/"||u.charAt(1)==="/")return u;if(u===P||u.indexOf(P+"/")===0)return u;return P+u;}
-try{var loc=window.location;var protoDesc=Object.getOwnPropertyDescriptor(Location.prototype,"pathname")||Object.getOwnPropertyDescriptor(Object.getPrototypeOf(loc),"pathname");
-var hrefDesc=Object.getOwnPropertyDescriptor(Location.prototype,"href")||Object.getOwnPropertyDescriptor(Object.getPrototypeOf(loc),"href");
-if(protoDesc&&protoDesc.get){Object.defineProperty(loc,"pathname",{configurable:true,get:function(){return strip(protoDesc.get.call(loc));},set:function(v){protoDesc.set.call(loc,add(v));}});}
-if(hrefDesc&&hrefDesc.get){Object.defineProperty(loc,"href",{configurable:true,get:function(){var h=hrefDesc.get.call(loc);try{var u=new URL(h);u.pathname=strip(u.pathname);return u.toString();}catch(e){return h;}},set:function(v){hrefDesc.set.call(loc,v);}});}}catch(e){}
-var _ps=history.pushState,_rs=history.replaceState;
-history.pushState=function(s,t,u){return _ps.call(history,s,t,add(u));};
-history.replaceState=function(s,t,u){return _rs.call(history,s,t,add(u));};})();`;
   const headInjection =
     `<link rel="canonical" href="${canonicalUrl}" data-apex-injected="1">` +
     `<meta property="og:url" content="${canonicalUrl}" data-apex-injected="1">` +
-    `<meta name="robots" content="index,follow,max-image-preview:large" data-apex-injected="1">` +
-    `<script data-apex-injected="1">${shim}</script>`;
-
-  const srcsetHandler = {
-    element(el) {
-      const v = el.getAttribute('srcset');
-      if (!v) return;
-      const out = v.split(',').map((part) => {
-        const seg = part.trim().split(/\s+/);
-        if (seg[0] && seg[0].startsWith('/') && !seg[0].startsWith('//')) {
-          seg[0] = `${app.prefix}${seg[0]}`;
-        }
-        return seg.join(' ');
-      }).join(', ');
-      el.setAttribute('srcset', out);
-    },
-  };
+    `<meta name="robots" content="index,follow,max-image-preview:large" data-apex-injected="1">`;
 
   const rewriter = new HTMLRewriter()
     .on('a[href]', new AttrPrefixer('href', app.prefix))
     .on('link[href]', new AttrPrefixer('href', app.prefix))
     .on('script[src]', new AttrPrefixer('src', app.prefix))
     .on('img[src]', new AttrPrefixer('src', app.prefix))
-    .on('img[srcset]', srcsetHandler)
+    .on('img[srcset]', new SrcsetPrefixer(app.prefix))
     .on('source[src]', new AttrPrefixer('src', app.prefix))
-    .on('source[srcset]', srcsetHandler)
+    .on('source[srcset]', new SrcsetPrefixer(app.prefix))
     .on('form[action]', new AttrPrefixer('action', app.prefix))
     .on('use[href]', new AttrPrefixer('href', app.prefix))
-    .on('title', new TitleRewriter(app.title))
     .on('head', new HeadInjector(headInjection));
 
-  return rewriter.transform(
-    new Response(upstreamRes.body, { status: upstreamRes.status, headers: resHeaders }),
+  const transformed = rewriter.transform(
+    new Response(upstreamRes.body, { status: upstreamRes.status, headers: { 'content-type': 'text/html; charset=utf-8' } }),
   );
+
+  // Final pass: rewrite asset strings inside inline <script>/<style>/JSON blocks.
+  let html = await transformed.text();
+  html = html.replace(/<script(\b[^>]*)>([\s\S]*?)<\/script>/gi, (m, attrs, body) => {
+    if (/\bsrc=/.test(attrs)) return m;
+    return `<script${attrs}>${rewriteAssetStringsInText(body, app.prefix)}</script>`;
+  });
+
+  return new Response(html, { status: upstreamRes.status, headers: resHeaders });
 }
 
 // ---------- Entrypoint ----------
@@ -388,7 +352,6 @@ export default {
     const sitemap = await handleSitemap(url.pathname);
     if (sitemap) return sitemap;
 
-    // Bare prefix → redirect to trailing-slash form for SEO consistency.
     for (const app of PROXIED_APPS) {
       if (url.pathname === app.prefix) {
         return Response.redirect(`https://${APEX_HOST}${app.prefix}/${url.search}`, 301);
@@ -401,4 +364,3 @@ export default {
     return fetch(request);
   },
 };
-
