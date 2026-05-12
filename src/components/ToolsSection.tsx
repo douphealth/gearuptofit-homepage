@@ -82,7 +82,7 @@ const ToolsSection = () => {
           </motion.a>
 
           <motion.a
-            href="https://fitness-plan.gearuptofit.com/"
+            href="https://gearuptofit.com/fitness-plan/"
             target="_blank"
             rel="noopener noreferrer"
             initial={{ opacity: 0, y: 16, filter: "blur(4px)" }}

@@ -30,7 +30,7 @@ const faqs: FAQ[] = [
   },
   {
     question: "How long should an 8-week beginner running plan be each week?",
-    answer: "A balanced 8-week beginner running plan progresses from roughly 8–10 km in week 1 to 25–30 km in week 8, spread across 3–4 sessions: two easy runs, one interval or tempo session, and a longer weekend run. Build mileage by no more than 10% per week to reduce injury risk, and include at least one full rest day. Build your custom plan free at fitness-plan.gearuptofit.com.",
+    answer: "A balanced 8-week beginner running plan progresses from roughly 8–10 km in week 1 to 25–30 km in week 8, spread across 3–4 sessions: two easy runs, one interval or tempo session, and a longer weekend run. Build mileage by no more than 10% per week to reduce injury risk, and include at least one full rest day. Build your custom plan free at gearuptofit.com/fitness-plan.",
   },
   {
     question: "How many calories should I eat to lose 1 pound per week?",
