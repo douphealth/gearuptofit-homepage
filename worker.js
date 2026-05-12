@@ -240,18 +240,22 @@ class HeadInjector {
 }
 
 async function fetchUpstream(request, app, upstreamUrl) {
+  // We deliberately do NOT forward conditional headers (if-none-match,
+  // if-modified-since): a 304 from upstream returns an empty body and would
+  // break our text-rewrite step.
   const upstreamHeaders = new Headers();
-  for (const h of ['accept', 'user-agent', 'accept-language', 'range', 'if-none-match', 'if-modified-since']) {
+  for (const h of ['accept', 'user-agent', 'accept-language']) {
     const v = request.headers.get(h);
     if (v) upstreamHeaders.set(h, v);
   }
   upstreamHeaders.set('x-forwarded-host', APEX_HOST);
   upstreamHeaders.set('x-forwarded-proto', 'https');
+  upstreamHeaders.set('accept-encoding', 'identity');
   return fetch(upstreamUrl, {
     method: request.method,
     headers: upstreamHeaders,
     redirect: 'manual',
-    cf: { cacheTtl: 60, cacheEverything: false },
+    cf: { cacheTtl: 0, cacheEverything: false },
   });
 }
 
