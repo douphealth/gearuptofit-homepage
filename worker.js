@@ -260,29 +260,28 @@ class HeadInjector {
 
 async function proxyApp(request, app) {
   const url = new URL(request.url);
-  // Strip the apex prefix to derive the upstream path
   let upstreamPath = url.pathname.slice(app.prefix.length) || '/';
   if (!upstreamPath.startsWith('/')) upstreamPath = `/${upstreamPath}`;
   const upstreamUrl = `https://${app.upstreamHost}${upstreamPath}${url.search}`;
 
-  // Pass through the request, but force Host + remove cookies that don't apply across origins.
-  const upstreamHeaders = new Headers(request.headers);
-  upstreamHeaders.set('host', app.upstreamHost);
-  upstreamHeaders.delete('cookie');
+  // Build a clean request — do NOT clone the original headers (they include
+  // host/cookie/cf-* that Cloudflare forbids modifying inside Workers).
+  const upstreamHeaders = new Headers();
+  const accept = request.headers.get('accept');
+  const ua = request.headers.get('user-agent');
+  const lang = request.headers.get('accept-language');
+  if (accept) upstreamHeaders.set('accept', accept);
+  if (ua) upstreamHeaders.set('user-agent', ua);
+  if (lang) upstreamHeaders.set('accept-language', lang);
   upstreamHeaders.set('x-forwarded-host', APEX_HOST);
   upstreamHeaders.set('x-forwarded-proto', 'https');
-  upstreamHeaders.set('accept-encoding', 'gzip');
-
-  const upstreamReq = new Request(upstreamUrl, {
-    method: request.method,
-    headers: upstreamHeaders,
-    body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
-    redirect: 'manual',
-  });
 
   let upstreamRes;
   try {
-    upstreamRes = await fetch(upstreamReq, {
+    upstreamRes = await fetch(upstreamUrl, {
+      method: request.method,
+      headers: upstreamHeaders,
+      redirect: 'manual',
       cf: { cacheTtl: 60, cacheEverything: false },
     });
   } catch (err) {
@@ -293,76 +292,74 @@ async function proxyApp(request, app) {
   if (upstreamRes.status >= 300 && upstreamRes.status < 400) {
     const loc = upstreamRes.headers.get('location') || '';
     let newLoc = loc;
-    if (loc.startsWith(`https://${app.upstreamHost}`)) {
-      newLoc = `https://${APEX_HOST}${app.prefix}${new URL(loc).pathname}${new URL(loc).search}`;
-    } else if (loc.startsWith('/')) {
-      newLoc = `${app.prefix}${loc}`;
-    }
-    const h = new Headers(upstreamRes.headers);
-    h.set('location', newLoc);
-    return new Response(null, { status: upstreamRes.status, headers: h });
+    try {
+      if (loc.startsWith(`https://${app.upstreamHost}`)) {
+        const parsed = new URL(loc);
+        newLoc = `https://${APEX_HOST}${app.prefix}${parsed.pathname}${parsed.search}`;
+      } else if (loc.startsWith('/')) {
+        newLoc = `${app.prefix}${loc}`;
+      }
+    } catch { /* ignore */ }
+    return new Response(null, {
+      status: upstreamRes.status,
+      headers: { location: newLoc, 'x-proxied-from': app.upstreamHost },
+    });
   }
 
   const contentType = upstreamRes.headers.get('content-type') || '';
-  const resHeaders = new Headers(upstreamRes.headers);
-  // Strip upstream caching/security headers that conflict with our origin.
-  resHeaders.delete('content-security-policy');
-  resHeaders.delete('content-security-policy-report-only');
-  resHeaders.delete('x-frame-options');
-  resHeaders.delete('strict-transport-security');
-  // Re-set sensible cache headers
-  if (upstreamPath.startsWith('/assets/') || /\.(js|css|woff2?|png|jpe?g|svg|webp|ico|gif|map)$/i.test(upstreamPath)) {
+  // Build a fresh response headers map (avoid CF-managed headers from upstream).
+  const resHeaders = new Headers();
+  resHeaders.set('content-type', contentType || 'application/octet-stream');
+  resHeaders.set('x-proxied-from', app.upstreamHost);
+  if (upstreamPath.startsWith('/assets/') || /\.(js|mjs|css|woff2?|png|jpe?g|svg|webp|ico|gif|map|json|txt)$/i.test(upstreamPath)) {
     resHeaders.set('cache-control', 'public, max-age=86400, s-maxage=86400');
   } else {
-    resHeaders.set('cache-control', 'public, max-age=300, s-maxage=300');
+    resHeaders.set('cache-control', 'public, max-age=120, s-maxage=120');
   }
-  resHeaders.set('x-proxied-from', app.upstreamHost);
 
+  // Non-HTML → stream through unchanged.
   if (!contentType.includes('text/html')) {
     return new Response(upstreamRes.body, { status: upstreamRes.status, headers: resHeaders });
   }
 
-  // HTML → rewrite root-relative URLs to live under app.prefix and inject SEO tags.
+  // HTML → rewrite root-relative URLs and inject SEO tags.
   const canonicalUrl = `https://${APEX_HOST}${app.prefix}/`;
-  const headInjection = `
-    <link rel="canonical" href="${canonicalUrl}" data-apex-injected />
-    <meta property="og:url" content="${canonicalUrl}" data-apex-injected />
-    <meta name="robots" content="index,follow" data-apex-injected />
-  `;
+  const headInjection =
+    `<link rel="canonical" href="${canonicalUrl}" data-apex-injected="1">` +
+    `<meta property="og:url" content="${canonicalUrl}" data-apex-injected="1">` +
+    `<meta name="robots" content="index,follow,max-image-preview:large" data-apex-injected="1">`;
+
+  const srcsetHandler = {
+    element(el) {
+      const v = el.getAttribute('srcset');
+      if (!v) return;
+      const out = v.split(',').map((part) => {
+        const seg = part.trim().split(/\s+/);
+        if (seg[0] && seg[0].startsWith('/') && !seg[0].startsWith('//')) {
+          seg[0] = `${app.prefix}${seg[0]}`;
+        }
+        return seg.join(' ');
+      }).join(', ');
+      el.setAttribute('srcset', out);
+    },
+  };
 
   const rewriter = new HTMLRewriter()
     .on('a[href]', new AttrPrefixer('href', app.prefix))
     .on('link[href]', new AttrPrefixer('href', app.prefix))
     .on('script[src]', new AttrPrefixer('src', app.prefix))
     .on('img[src]', new AttrPrefixer('src', app.prefix))
-    .on('img[srcset]', { element(el) {
-      const v = el.getAttribute('srcset'); if (!v) return;
-      const out = v.split(',').map(part => {
-        const seg = part.trim().split(/\s+/);
-        if (seg[0] && seg[0].startsWith('/') && !seg[0].startsWith('//')) seg[0] = `${app.prefix}${seg[0]}`;
-        return seg.join(' ');
-      }).join(', ');
-      el.setAttribute('srcset', out);
-    }})
+    .on('img[srcset]', srcsetHandler)
     .on('source[src]', new AttrPrefixer('src', app.prefix))
-    .on('source[srcset]', { element(el) {
-      const v = el.getAttribute('srcset'); if (!v) return;
-      const out = v.split(',').map(part => {
-        const seg = part.trim().split(/\s+/);
-        if (seg[0] && seg[0].startsWith('/') && !seg[0].startsWith('//')) seg[0] = `${app.prefix}${seg[0]}`;
-        return seg.join(' ');
-      }).join(', ');
-      el.setAttribute('srcset', out);
-    }})
+    .on('source[srcset]', srcsetHandler)
     .on('form[action]', new AttrPrefixer('action', app.prefix))
     .on('use[href]', new AttrPrefixer('href', app.prefix))
-    .on('use[xlink:href]', new AttrPrefixer('xlink:href', app.prefix))
-    .on('link[rel="canonical"]', new CanonicalRewriter(canonicalUrl))
-    .on('meta', new MetaContentRewriter(app.prefix, canonicalUrl))
     .on('title', new TitleRewriter(app.title))
     .on('head', new HeadInjector(headInjection));
 
-  return rewriter.transform(new Response(upstreamRes.body, { status: upstreamRes.status, headers: resHeaders }));
+  return rewriter.transform(
+    new Response(upstreamRes.body, { status: upstreamRes.status, headers: resHeaders }),
+  );
 }
 
 // ---------- Entrypoint ----------
@@ -387,3 +384,4 @@ export default {
     return fetch(request);
   },
 };
+
