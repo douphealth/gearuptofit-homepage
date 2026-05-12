@@ -106,6 +106,7 @@ const desiredRoutes = [
   '/fitness-plan/*',
   '/watch-match',
   '/watch-match/*',
+  '/assets/*',
 ].map((p) => `${zoneName}${p}`);
 
 const existingRes = await jget(
