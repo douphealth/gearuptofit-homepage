@@ -106,9 +106,12 @@ const desiredRoutes = [
   '/fitness-plan/*',
   '/watch-match',
   '/watch-match/*',
-  '/assets/*',
   '/~api/analytics',
 ].map((p) => `${zoneName}${p}`);
+
+// Routes we previously created but must NOT own — the apex homepage is itself
+// a Lovable SPA and needs unfiltered access to /assets/*.
+const forbiddenPatterns = new Set([`${zoneName}/assets/*`]);
 
 const existingRes = await jget(
   `https://api.cloudflare.com/client/v4/zones/${zoneId}/workers/routes`,
