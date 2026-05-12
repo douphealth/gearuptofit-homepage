@@ -108,6 +108,34 @@ const ToolsSection = () => {
               </span>
             </div>
           </motion.a>
+
+          <motion.a
+            href="https://gearuptofit.com/watch-match/"
+            target="_blank"
+            rel="noopener noreferrer"
+            initial={{ opacity: 0, y: 16, filter: "blur(4px)" }}
+            whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            viewport={{ once: true, amount: 0.2 }}
+            transition={{ duration: 0.5, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
+            className="group relative bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30 p-8 card-hover block rounded-sm overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 w-40 h-40 bg-primary/10 rounded-full -translate-y-20 translate-x-20 group-hover:scale-[2] transition-transform duration-700" />
+            <div className="relative z-10">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-primary/20 text-primary text-xs font-bold uppercase tracking-wider rounded-sm mb-3">
+                New
+              </span>
+              <h3 className="text-xl font-bold uppercase tracking-wide font-display mb-2 group-hover:text-primary transition-colors duration-200">
+                Watch Match
+              </h3>
+              <p className="text-sm text-muted-foreground font-body mb-4">
+                Find your ideal smartwatch or fitness tracker — matched to your sport, budget, and ecosystem.
+              </p>
+              <span className="inline-flex items-center gap-2 text-primary font-display text-sm uppercase tracking-wider font-semibold">
+                Match Your Watch
+                <ArrowRight className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-1" />
+              </span>
+            </div>
+          </motion.a>
         </div>
       </div>
     </section>
