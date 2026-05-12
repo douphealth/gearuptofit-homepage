@@ -1,7 +1,7 @@
 // Direct Cloudflare REST deploy. Wrangler 4.x rejects Email+Key auth, but
 // the Cloudflare API still accepts it for legacy global-key admins.
 import { readFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+
 
 const cloudflareSecret = process.env.CLOUDFLARE_API_TOKEN?.trim();
 const cloudflareEmail = 'Papalexios@gmail.com';
