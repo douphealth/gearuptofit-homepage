@@ -200,6 +200,7 @@ const checks = await Promise.all([
   expect('sitemap-pages.xml ok', `https://${zoneName}/sitemap-pages.xml`, (r) => r.status === 200),
   expect('sitemap-lovable.xml ok', `https://${zoneName}/sitemap-lovable.xml`, (r) => r.status === 200),
   expect('/~api/analytics 204 no-op', `https://${zoneName}/~api/analytics`, (r) => r.status === 204),
+  expect('/api/sub-app-status returns JSON', `https://${zoneName}/api/sub-app-status`, (r) => r.status === 200 && r.ct.includes('application/json')),
   expect('apex /assets/* served by homepage app', `https://${zoneName}${assetMatch[0] || '/assets/index-K59NMtfd.js'}`, (r) => r.status === 200 && r.headers.get('x-apex-source') === 'gearup-flow-master.lovable.app'),
 ]);
 
