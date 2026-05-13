@@ -113,6 +113,8 @@ const desiredRoutes = [
   '/shoe-finder',
   '/shoe-finder/*',
   '/~api/analytics',
+  '/api/sub-app-status',
+  '/status',
 ].map((p) => `${zoneName}${p}`);
 
 // Routes we previously created but must NOT own.
