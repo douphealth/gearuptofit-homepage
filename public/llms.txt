@@ -17,9 +17,9 @@
 - Gear Reviews: https://gearuptofit.com/review/
 
 ## Interactive Tools
-- Running Shoe Finder (9-question quiz): https://gearuptofit.com/shoe-match/
+- Running Shoe Finder (9-question quiz): https://gearuptofit.com/shoe-finder/
 - 8-Week Custom Training Plan Builder: https://fitness-plan.gearuptofit.com/
-- Free Fitness Calculators (BMI, TDEE, Macro, Body Fat, BMR): https://fitness-calculators.gearuptofit.com/
+- Free Fitness Calculators (BMI, TDEE, Macro, Body Fat, BMR): https://gearuptofit.com/fitness-and-health-calculators/
 
 ## Latest Featured Reviews & Guides (2026)
 - Hoka Speedgoat 7 Review (150+ miles tested): https://gearuptofit.com/running/hoka-speedgoat-7/
