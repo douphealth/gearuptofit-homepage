@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.wp-overhaul]
 verify_jwt = false
+
+[functions.sub-app-status]
+verify_jwt = false
