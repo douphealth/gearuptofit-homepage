@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 type Target = {
   label: string;
@@ -9,12 +10,48 @@ type Target = {
   deploymentId: string | null;
   lastModified: string | null;
   date: string | null;
+  cacheControl?: string | null;
+  responseMs?: number;
   error?: string;
 };
 
 type StatusResponse = {
   checkedAt: string;
   targets: Target[];
+  source?: "worker" | "cloud";
+};
+
+const parseStatusResponse = async (res: Response): Promise<StatusResponse> => {
+  const contentType = res.headers.get("content-type") || "";
+  const body = await res.text();
+
+  if (!res.ok) {
+    throw new Error(`Worker endpoint returned HTTP ${res.status}`);
+  }
+
+  if (!contentType.includes("application/json")) {
+    throw new Error(`Worker endpoint returned ${contentType || "unknown content type"}`);
+  }
+
+  return JSON.parse(body) as StatusResponse;
+};
+
+const loadWorkerStatus = async () => {
+  const res = await fetch(`/api/sub-app-status?ts=${Date.now()}`, {
+    cache: "no-store",
+    headers: { accept: "application/json" },
+  });
+  return { ...(await parseStatusResponse(res)), source: "worker" as const };
+};
+
+const loadCloudStatus = async () => {
+  const { data, error } = await supabase.functions.invoke<StatusResponse>("sub-app-status", {
+    body: { ts: Date.now() },
+  });
+
+  if (error) throw error;
+  if (!data?.targets?.length) throw new Error("Cloud status endpoint returned no targets");
+  return { ...data, source: "cloud" as const };
 };
 
 export default function StatusPage() {
@@ -26,11 +63,13 @@ export default function StatusPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/sub-app-status", { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setData(await res.json());
+      setData(await loadWorkerStatus());
     } catch (e) {
-      setError(String(e));
+      try {
+        setData(await loadCloudStatus());
+      } catch (fallbackError) {
+        setError(`Status unavailable. Worker: ${String(e)}. Cloud fallback: ${String(fallbackError)}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -66,7 +105,7 @@ export default function StatusPage() {
         {data && (
           <>
             <p className="text-xs text-muted-foreground mb-4">
-              Checked at {new Date(data.checkedAt).toLocaleString()}
+              Checked at {new Date(data.checkedAt).toLocaleString()} · Source: {data.source === "cloud" ? "Lovable Cloud fallback" : "apex worker"}
             </p>
             <div className="space-y-3">
               {data.targets.map((t) => (
@@ -81,7 +120,7 @@ export default function StatusPage() {
                     </div>
                     <span
                       className={`text-xs px-2 py-1 rounded ${
-                        t.ok ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                        t.ok ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive"
                       }`}
                     >
                       HTTP {t.status}
@@ -95,6 +134,14 @@ export default function StatusPage() {
                     <div>
                       <dt className="text-muted-foreground inline">Last-Modified: </dt>
                       <dd className="inline">{t.lastModified ?? "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground inline">Response: </dt>
+                      <dd className="inline">{typeof t.responseMs === "number" ? `${t.responseMs}ms` : "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground inline">Cache-Control: </dt>
+                      <dd className="inline">{t.cacheControl ?? "—"}</dd>
                     </div>
                   </dl>
                   {t.error && (

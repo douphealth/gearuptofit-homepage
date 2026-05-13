@@ -427,11 +427,16 @@ async function proxyApexApp(request) {
 }
 
 async function probeHost(host) {
+  const startedAt = Date.now();
   try {
     const res = await fetch(`https://${host}/`, {
       method: 'GET',
-      cf: { cacheTtl: 30, cacheEverything: false },
-      headers: { 'user-agent': 'gearuptofit-status-probe' },
+      cf: { cacheTtl: 0, cacheEverything: false },
+      headers: {
+        accept: 'text/html,*/*;q=0.8',
+        'cache-control': 'no-cache',
+        'user-agent': 'GearUpToFit-Deployment-Status/1.0',
+      },
     });
     return {
       host,
@@ -439,10 +444,12 @@ async function probeHost(host) {
       deploymentId: res.headers.get('x-deployment-id') || null,
       lastModified: res.headers.get('last-modified') || null,
       date: res.headers.get('date') || null,
+      cacheControl: res.headers.get('cache-control') || null,
+      responseMs: Date.now() - startedAt,
       ok: res.ok,
     };
   } catch (err) {
-    return { host, status: 0, ok: false, error: String(err) };
+    return { host, status: 0, ok: false, responseMs: Date.now() - startedAt, error: String(err) };
   }
 }
 
@@ -458,7 +465,7 @@ async function handleSubAppStatus() {
     status: 200,
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'public, max-age=30, s-maxage=30',
+      'cache-control': 'no-store',
       'access-control-allow-origin': '*',
     },
   });
