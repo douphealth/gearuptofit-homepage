@@ -48,13 +48,14 @@ function formatDate(iso: string): string {
   });
 }
 
-async function fetchLatestPosts(perPage: number, bust: boolean): Promise<LivePost[]> {
-  // orderby=date DESC by default — newest first. Cache-bust on manual refresh.
-  const ts = bust ? `&_=${Date.now()}` : "";
+async function fetchLatestPosts(perPage: number): Promise<LivePost[]> {
+  // Always cache-bust so the homepage shows the actual latest posts the moment
+  // they go live on gearuptofit.com (and so the manual Refresh button is real).
+  const ts = `&_=${Date.now()}`;
   const endpoint = `${APEX}/wp-json/wp/v2/posts?per_page=${perPage}&orderby=date&order=desc&_embed=wp:featuredmedia,wp:term&status=publish${ts}`;
   const res = await fetch(endpoint, {
-    headers: { accept: "application/json" },
-    cache: bust ? "no-store" : "default",
+    headers: { accept: "application/json", "cache-control": "no-cache" },
+    cache: "no-store",
   });
   if (!res.ok) throw new Error(`WP REST failed: ${res.status}`);
   const data: any[] = await res.json();
