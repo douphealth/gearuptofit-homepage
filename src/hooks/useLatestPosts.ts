@@ -88,11 +88,7 @@ async function fetchLatestPosts(perPage: number): Promise<LivePost[]> {
 export function useLatestPosts(perPage = 9) {
   return useQuery({
     queryKey: ["latest-posts", perPage],
-    // React Query passes { meta } to queryFn; we read a `bust` flag from meta
-    queryFn: async ({ meta }) => {
-      const bust = Boolean((meta as { bust?: boolean } | undefined)?.bust);
-      return fetchLatestPosts(perPage, bust);
-    },
+    queryFn: () => fetchLatestPosts(perPage),
     staleTime: 1000 * 60 * 2, // 2 min — keep it fresh
     refetchInterval: 1000 * 60 * 5, // background poll every 5 min
     refetchOnWindowFocus: true,
