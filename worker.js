@@ -24,6 +24,13 @@ const PROXIED_APPS = [
     description: 'Match the right GPS / sports watch to your training. Honest, data-driven recommendations from Gear Up To Fit.',
     framework: 'tanstack-start',
   },
+  {
+    prefix: '/shoe-finder',
+    upstreamHost: 'runmatch-ai-buddy.lovable.app',
+    title: 'Shoe Finder — Match Your Perfect Running Shoe | Gear Up To Fit',
+    description: 'Find the right running shoe for your gait, mileage, and terrain. Honest, data-driven matches from Gear Up To Fit.',
+    framework: 'react-router',
+  },
 ];
 
 // Only routes that actually return 200 from the apex (verified). Routes that
