@@ -97,6 +97,7 @@ console.log(`Uploaded worker script (${(scriptBody.length / 1024).toFixed(2)} Ki
 
 // --- Reconcile routes ---
 const desiredRoutes = [
+  '/',
   '/sitemap.xml',
   '/sitemap_index.xml',
   '/sitemap-posts.xml',
@@ -106,6 +107,8 @@ const desiredRoutes = [
   '/fitness-plan/*',
   '/watch-match',
   '/watch-match/*',
+  '/shoe-finder',
+  '/shoe-finder/*',
   '/~api/analytics',
 ].map((p) => `${zoneName}${p}`);
 
