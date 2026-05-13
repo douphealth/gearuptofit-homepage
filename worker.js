@@ -391,6 +391,41 @@ function recoverAssetByReferer(url, request) {
   return null;
 }
 
+async function proxyApexApp(request) {
+  const url = new URL(request.url);
+  const upstreamUrl = `https://${APEX_APP_HOST}${url.pathname}${url.search}`;
+  const upstreamRes = await fetch(upstreamUrl, {
+    headers: {
+      accept: request.headers.get('accept') || '*/*',
+      'user-agent': request.headers.get('user-agent') || 'GearUpToFit-Apex-App/1.0',
+    },
+    redirect: 'manual',
+  });
+
+  if (upstreamRes.status >= 300 && upstreamRes.status < 400) {
+    const loc = upstreamRes.headers.get('location') || '';
+    let nextLoc = loc;
+    if (loc.startsWith(`https://${APEX_APP_HOST}`)) {
+      const parsed = new URL(loc);
+      nextLoc = `https://${APEX_HOST}${parsed.pathname}${parsed.search}`;
+    }
+    return new Response(null, { status: upstreamRes.status, headers: { location: nextLoc } });
+  }
+
+  const headers = new Headers(upstreamRes.headers);
+  headers.set('x-apex-source', APEX_APP_HOST);
+  if (headers.get('content-type')?.includes('text/html')) {
+    headers.set('cache-control', 'public, max-age=60, must-revalidate');
+    headers.set('cdn-cache-control', 'public, max-age=60, stale-while-revalidate=300');
+    headers.set('cloudflare-cdn-cache-control', 'public, max-age=60, stale-while-revalidate=300');
+    headers.set('surrogate-control', 'max-age=60');
+    headers.delete('age');
+    headers.delete('expires');
+    headers.set('x-apex-cache', 'short-html-v3');
+  }
+  return new Response(upstreamRes.body, { status: upstreamRes.status, statusText: upstreamRes.statusText, headers });
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
