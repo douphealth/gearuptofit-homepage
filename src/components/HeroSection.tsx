@@ -9,9 +9,11 @@ const HeroSection = () => {
       <div className="absolute inset-0">
         <img
           src={heroImage}
-          alt="Athlete sprinting with dramatic red lighting"
+          alt="Runner training at sunrise — running shoes, fitness watch, and training plan"
           className="w-full h-full object-cover"
           loading="eager"
+          width={1920}
+          height={1080}
         />
         <div className="absolute inset-0 bg-gradient-to-r from-background via-background/90 to-background/40" />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-background/60" />
@@ -27,64 +29,65 @@ const HeroSection = () => {
           <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-primary/15 border border-primary/30 rounded-sm mb-6">
             <span className="w-2 h-2 rounded-full bg-primary animate-pulse-red" />
             <span className="text-sm font-medium tracking-wide uppercase text-primary font-display">
-              Your Fitness Command Center
+              Independent Running &amp; Fitness Tools
             </span>
           </div>
 
-          <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold uppercase tracking-tight leading-[0.9] mb-6" data-speakable>
-            <span className="block">Gear Up.</span>
-            <span className="block text-gradient-red">Get Fit.</span>
-            <span className="block text-muted-foreground text-3xl md:text-4xl lg:text-5xl mt-2 font-medium">
-              Expert Guides • Honest Reviews • Real Results
-            </span>
+          <h1
+            className="text-4xl md:text-6xl lg:text-7xl font-bold uppercase tracking-tight leading-[0.95] mb-6"
+            data-speakable
+          >
+            Running Shoe Reviews,{" "}
+            <span className="text-gradient-red">Fitness Calculators</span> &amp; Training Tools for Smarter Fitness
           </h1>
 
-          <p className="text-lg md:text-xl text-muted-foreground max-w-xl mb-8 font-body leading-relaxed">
-            Answer 9 quick questions and get a personalized shoe recommendation based on your training, pace, and goals.
-            Or build your custom 8-week running & fitness plan — all backed by science and real-world testing.
+          <p
+            className="text-lg md:text-xl text-muted-foreground max-w-2xl mb-8 font-body leading-relaxed"
+            data-speakable
+          >
+            GearUpToFit helps runners and active people choose better running shoes, compare fitness gear, find the
+            right fitness watch, calculate training targets, and build realistic workout plans using evidence-aware
+            guides, free tools, and practical recommendations.
           </p>
 
           <div className="flex flex-col gap-4">
-            {/* Primary CTAs */}
-            <div className="flex flex-col sm:flex-row gap-4">
+            {/* Primary CTAs — all four homepage tools */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <a
-                href="https://gearuptofit.com/shoe-match/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-primary font-display text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
+                href="https://gearuptofit.com/shoe-finder/"
+                aria-label="Find your running shoes with the Running Shoe Finder"
+                className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-primary font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
               >
-                <span className="hidden sm:inline">Find Your Perfect Shoe</span>
-                <span className="sm:hidden">Shoe Finder</span>
+                Find Your Running Shoes
+                <ArrowRight className="w-5 h-5" />
+              </a>
+              <a
+                href="https://gearuptofit.com/watch-match/"
+                aria-label="Find your fitness watch with Watch Match"
+                className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-primary font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
+              >
+                Find Your Fitness Watch
                 <ArrowRight className="w-5 h-5" />
               </a>
               <a
                 href="https://gearuptofit.com/fitness-plan/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 px-8 py-4 border border-primary/50 font-display text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
+                aria-label="Build your fitness plan"
+                className="inline-flex items-center justify-center gap-2 px-6 py-4 border border-primary/50 font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
               >
-                <span className="hidden sm:inline">8-Week Training Plan</span>
-                <span className="sm:hidden">Training Plan</span>
+                Build Your Fitness Plan
               </a>
               <a
-                href="https://gearuptofit.com/watch-match/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 px-8 py-4 border border-primary/50 font-display text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
+                href="https://gearuptofit.com/fitness-and-health-calculators/"
+                aria-label="Explore fitness and health calculators"
+                className="inline-flex items-center justify-center gap-2 px-6 py-4 border border-primary/50 font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
               >
-                <span className="hidden sm:inline">Watch Match</span>
-                <span className="sm:hidden">Watch Match</span>
-                <ArrowRight className="w-5 h-5" />
+                Explore Fitness Calculators
               </a>
             </div>
-            
-            {/* Secondary CTA */}
-            <a
-              href="#categories"
-              className="inline-flex items-center justify-center gap-2 px-8 py-3 border border-foreground/20 font-display text-sm uppercase tracking-wider font-semibold transition-all duration-200 hover:border-primary hover:text-primary active:scale-[0.97] rounded-sm text-muted-foreground"
-            >
-              Browse All Topics
-            </a>
+
+            <p className="text-xs sm:text-sm text-muted-foreground/80 font-body italic">
+              Independent gear guidance, practical fitness tools, transparent reviews, and research-aware recommendations.
+            </p>
           </div>
         </motion.div>
 
@@ -96,8 +99,8 @@ const HeroSection = () => {
           className="mt-16 flex flex-wrap gap-8 md:gap-16"
         >
           {[
-            { num: "200+", label: "Expert Articles" },
-            { num: "6", label: "Core Categories" },
+            { num: "200+", label: "Expert Guides" },
+            { num: "16+", label: "Fitness Calculators" },
             { num: "150+", label: "Gear Reviews" },
             { num: "50K+", label: "Monthly Readers" },
           ].map((stat) => (

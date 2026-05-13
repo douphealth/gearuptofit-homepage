@@ -4,7 +4,6 @@ import { ArrowRight } from "lucide-react";
 const CTASection = () => {
   return (
     <section className="py-24 md:py-32 relative overflow-hidden">
-      {/* Background accent */}
       <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-background to-background" />
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-primary/5 blur-[120px]" />
 
@@ -17,31 +16,39 @@ const CTASection = () => {
         >
           <h2 className="text-4xl md:text-6xl lg:text-7xl font-bold uppercase tracking-tight font-display mb-6 leading-[0.95]">
             Ready to
-            <span className="text-gradient-red block">Transform?</span>
+            <span className="text-gradient-red block">Train Smarter?</span>
           </h2>
 
           <p className="text-lg md:text-xl text-muted-foreground font-body max-w-2xl mx-auto mb-10 leading-relaxed">
-            Get personalized shoe recommendations with our AI-powered Shoe Finder, or build your custom
-            8-week training plan. Science-backed fitness tools designed for real results.
+            Match your running shoes, find the right fitness watch, build a realistic plan, and use free calculators
+            — all in one place.
           </p>
 
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 justify-center">
             <a
-              href="https://gearuptofit.com/shoe-match/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 px-10 py-5 bg-primary font-display text-xl uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
+              href="https://gearuptofit.com/shoe-finder/"
+              className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-primary font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
             >
-              Find Your Perfect Shoe
+              Find Your Running Shoes
               <ArrowRight className="w-5 h-5" />
             </a>
             <a
-              href="https://gearuptofit.com/fitness-plan/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 px-10 py-5 border border-primary/50 font-display text-xl uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
+              href="https://gearuptofit.com/watch-match/"
+              className="inline-flex items-center justify-center gap-2 px-8 py-4 border border-primary/50 font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
             >
-              8-Week Plan
+              Find Your Fitness Watch
+            </a>
+            <a
+              href="https://gearuptofit.com/fitness-plan/"
+              className="inline-flex items-center justify-center gap-2 px-8 py-4 border border-primary/50 font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
+            >
+              Build Your Fitness Plan
+            </a>
+            <a
+              href="https://gearuptofit.com/fitness-and-health-calculators/"
+              className="inline-flex items-center justify-center gap-2 px-8 py-4 border border-primary/50 font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
+            >
+              Explore Calculators
             </a>
           </div>
         </motion.div>

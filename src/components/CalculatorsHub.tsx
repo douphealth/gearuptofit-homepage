@@ -153,12 +153,11 @@ const CalculatorsHub = () => {
           className="mt-8 text-center"
         >
           <a
-            href="https://fitness-calculators.gearuptofit.com/"
-            target="_blank"
-            rel="noopener noreferrer"
+            href="https://gearuptofit.com/fitness-and-health-calculators/"
+            aria-label="Explore all fitness and health calculators"
             className="inline-flex items-center gap-2 px-8 py-4 bg-primary font-display text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
           >
-            View All Calculators
+            Explore Fitness Calculators
             <ArrowRight className="w-5 h-5" />
           </a>
         </motion.div>

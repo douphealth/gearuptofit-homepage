@@ -1,5 +1,6 @@
 import SiteHeader from "@/components/SiteHeader";
 import HeroSection from "@/components/HeroSection";
+import StartWithRightTool from "@/components/StartWithRightTool";
 import LiveTicker from "@/components/LiveTicker";
 import FitnessQuiz from "@/components/FitnessQuiz";
 import CategoryPillars from "@/components/CategoryPillars";
@@ -20,6 +21,7 @@ const Index = () => {
       <main role="main">
         <article itemScope itemType="https://schema.org/WebPage">
           <HeroSection />
+          <StartWithRightTool />
           <FitnessQuiz />
           <LiveTicker />
           <nav aria-label="Content categories">

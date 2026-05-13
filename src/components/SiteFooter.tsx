@@ -52,23 +52,23 @@ const SiteFooter = () => {
             </h4>
             <ul className="space-y-2">
               <li>
-                <a href="https://gearuptofit.com/shoe-match/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
-                  Shoe Finder Tool
+                <a href="https://gearuptofit.com/shoe-finder/" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                  Running Shoe Finder
                 </a>
               </li>
               <li>
-                <a href="https://gearuptofit.com/fitness-plan/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
-                  8-Week Training Plan
-                </a>
-              </li>
-              <li>
-                <a href="https://gearuptofit.com/watch-match/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                <a href="https://gearuptofit.com/watch-match/" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
                   Watch Match
                 </a>
               </li>
               <li>
-                <a href="https://fitness-calculators.gearuptofit.com/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
-                  Fitness Calculators
+                <a href="https://gearuptofit.com/fitness-plan/" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                  Fitness Plan
+                </a>
+              </li>
+              <li>
+                <a href="https://gearuptofit.com/fitness-and-health-calculators/" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                  Fitness &amp; Health Calculators
                 </a>
               </li>
               <li>
