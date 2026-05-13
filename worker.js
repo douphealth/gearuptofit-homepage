@@ -442,9 +442,8 @@ export default {
     const app = matchProxiedApp(url.pathname);
     if (app) return proxyApp(request, app);
 
-    // NOTE: do NOT recover bare /assets/* by referer. The apex domain itself
-    // is a Lovable SPA whose bundles live at /assets/*; intercepting that path
-    // broke the homepage. Proxied apps get their assets prefixed at source.
+    const refererApp = recoverAssetByReferer(url, request);
+    if (refererApp) return proxyApp(request, refererApp);
 
     // Lovable badge analytics endpoint does not exist on the apex domain; make
     // it a clean no-op so production consoles stay error-free.
@@ -452,27 +451,6 @@ export default {
       return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
     }
 
-    // Pass through to Lovable's origin for everything else (the apex SPA).
-    // Override HTML cache-control so newly-published builds propagate within
-    // ~60s instead of being stuck behind Cloudflare's 1h edge cache. Hashed
-    // assets keep their long TTL.
-    const originRes = await fetch(request);
-    const ct = originRes.headers.get('content-type') || '';
-    const isHtml = ct.includes('text/html');
-    // Hashed JS/CSS bundles are immutable — leave them alone.
-    const isHashedAsset = /\/assets\/.+\.[a-f0-9]{6,}\.(?:js|mjs|css|woff2?|png|jpe?g|svg|webp)$/i.test(url.pathname);
-
-    if (!isHtml || isHashedAsset) return originRes;
-
-    const headers = new Headers(originRes.headers);
-    headers.set('cache-control', 'public, max-age=60, must-revalidate');
-    // Cloudflare-specific: overrides zone Cache Rules / origin Cache-Control.
-    headers.set('cdn-cache-control', 'public, max-age=60, stale-while-revalidate=300');
-    headers.set('cloudflare-cdn-cache-control', 'public, max-age=60, stale-while-revalidate=300');
-    headers.set('surrogate-control', 'max-age=60');
-    headers.delete('age');
-    headers.delete('expires');
-    headers.set('x-apex-cache', 'short-html-v2');
-    return new Response(originRes.body, { status: originRes.status, statusText: originRes.statusText, headers });
+    return proxyApexApp(request);
   },
 };
