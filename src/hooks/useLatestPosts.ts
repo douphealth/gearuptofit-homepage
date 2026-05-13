@@ -49,13 +49,14 @@ function formatDate(iso: string): string {
 }
 
 async function fetchLatestPosts(perPage: number): Promise<LivePost[]> {
-  // Always cache-bust so the homepage shows the actual latest posts the moment
-  // they go live on gearuptofit.com (and so the manual Refresh button is real).
+  // Cache-bust via query param only — adding custom request headers like
+  // `cache-control` triggers a CORS preflight that the WP REST endpoint
+  // doesn't answer, causing "Failed to fetch". A unique URL per call is
+  // enough to bypass browser/CDN caches as a simple GET.
   const ts = `&_=${Date.now()}`;
   const endpoint = `${APEX}/wp-json/wp/v2/posts?per_page=${perPage}&orderby=date&order=desc&_embed=wp:featuredmedia,wp:term&status=publish${ts}`;
   const res = await fetch(endpoint, {
-    headers: { accept: "application/json", "cache-control": "no-cache" },
-    cache: "no-store",
+    headers: { accept: "application/json" },
   });
   if (!res.ok) throw new Error(`WP REST failed: ${res.status}`);
   const data: any[] = await res.json();
