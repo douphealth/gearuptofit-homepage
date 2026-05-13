@@ -24,6 +24,13 @@ const PROXIED_APPS = [
     description: 'Match the right GPS / sports watch to your training. Honest, data-driven recommendations from Gear Up To Fit.',
     framework: 'tanstack-start',
   },
+  {
+    prefix: '/shoe-finder',
+    upstreamHost: 'runmatch-ai-buddy.lovable.app',
+    title: 'Shoe Finder — Match Your Perfect Running Shoe | Gear Up To Fit',
+    description: 'Find the right running shoe for your gait, mileage, and terrain. Honest, data-driven matches from Gear Up To Fit.',
+    framework: 'react-router',
+  },
 ];
 
 // Only routes that actually return 200 from the apex (verified). Routes that
@@ -33,6 +40,7 @@ const PROXIED_APPS = [
 const LOVABLE_ROUTES = [
   '/',
   '/shoe-match/',
+  '/shoe-finder/',
   '/blog/',
   '/calculators/',
   '/fitness-plan/',
@@ -421,9 +429,14 @@ export default {
     if (!isHtml || isHashedAsset) return originRes;
 
     const headers = new Headers(originRes.headers);
-    headers.set('cache-control', 'public, max-age=60, s-maxage=60, stale-while-revalidate=300, must-revalidate');
+    headers.set('cache-control', 'public, max-age=60, must-revalidate');
+    // Cloudflare-specific: overrides zone Cache Rules / origin Cache-Control.
+    headers.set('cdn-cache-control', 'public, max-age=60, stale-while-revalidate=300');
+    headers.set('cloudflare-cdn-cache-control', 'public, max-age=60, stale-while-revalidate=300');
+    headers.set('surrogate-control', 'max-age=60');
     headers.delete('age');
-    headers.set('x-apex-cache', 'short-html');
+    headers.delete('expires');
+    headers.set('x-apex-cache', 'short-html-v2');
     return new Response(originRes.body, { status: originRes.status, statusText: originRes.statusText, headers });
   },
 };
