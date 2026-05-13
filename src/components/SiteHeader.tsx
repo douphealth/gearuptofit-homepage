@@ -97,7 +97,7 @@ const SiteHeader = () => {
                 })}
               </div>
               <div className="p-4 border-t border-border grid grid-cols-2 gap-3">
-                <a href="https://gearuptofit.com/shoe-match/" target="_blank" rel="noopener noreferrer"
+                <a href="https://gearuptofit.com/shoe-finder/"
                   className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-primary font-display text-xs uppercase tracking-widest font-bold rounded-sm text-primary-foreground">
                   Shoe Finder
                 </a>
