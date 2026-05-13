@@ -429,9 +429,14 @@ export default {
     if (!isHtml || isHashedAsset) return originRes;
 
     const headers = new Headers(originRes.headers);
-    headers.set('cache-control', 'public, max-age=60, s-maxage=60, stale-while-revalidate=300, must-revalidate');
+    headers.set('cache-control', 'public, max-age=60, must-revalidate');
+    // Cloudflare-specific: overrides zone Cache Rules / origin Cache-Control.
+    headers.set('cdn-cache-control', 'public, max-age=60, stale-while-revalidate=300');
+    headers.set('cloudflare-cdn-cache-control', 'public, max-age=60, stale-while-revalidate=300');
+    headers.set('surrogate-control', 'max-age=60');
     headers.delete('age');
-    headers.set('x-apex-cache', 'short-html');
+    headers.delete('expires');
+    headers.set('x-apex-cache', 'short-html-v2');
     return new Response(originRes.body, { status: originRes.status, statusText: originRes.statusText, headers });
   },
 };
