@@ -426,7 +426,43 @@ async function proxyApexApp(request) {
   return new Response(upstreamRes.body, { status: upstreamRes.status, statusText: upstreamRes.statusText, headers });
 }
 
-export default {
+async function probeHost(host) {
+  try {
+    const res = await fetch(`https://${host}/`, {
+      method: 'GET',
+      cf: { cacheTtl: 30, cacheEverything: false },
+      headers: { 'user-agent': 'gearuptofit-status-probe' },
+    });
+    return {
+      host,
+      status: res.status,
+      deploymentId: res.headers.get('x-deployment-id') || null,
+      lastModified: res.headers.get('last-modified') || null,
+      date: res.headers.get('date') || null,
+      ok: res.ok,
+    };
+  } catch (err) {
+    return { host, status: 0, ok: false, error: String(err) };
+  }
+}
+
+async function handleSubAppStatus() {
+  const targets = [
+    { label: 'Apex homepage (gearuptofit.com)', host: APEX_APP_HOST, prefix: '/' },
+    ...PROXIED_APPS.map((app) => ({ label: app.prefix, host: app.upstreamHost, prefix: app.prefix })),
+  ];
+  const results = await Promise.all(
+    targets.map(async (t) => ({ ...t, ...(await probeHost(t.host)) }))
+  );
+  return new Response(JSON.stringify({ checkedAt: new Date().toISOString(), targets: results }, null, 2), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'public, max-age=30, s-maxage=30',
+      'access-control-allow-origin': '*',
+    },
+  });
+}
   async fetch(request) {
     const url = new URL(request.url);
 
