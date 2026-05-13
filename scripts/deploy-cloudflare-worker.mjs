@@ -103,6 +103,9 @@ const desiredRoutes = [
   '/sitemap-posts.xml',
   '/sitemap-pages.xml',
   '/sitemap-lovable.xml',
+  '/manifest.webmanifest',
+  '/~flock.js',
+  '/assets/*',
   '/fitness-plan',
   '/fitness-plan/*',
   '/watch-match',
@@ -112,9 +115,8 @@ const desiredRoutes = [
   '/~api/analytics',
 ].map((p) => `${zoneName}${p}`);
 
-// Routes we previously created but must NOT own — the apex homepage is itself
-// a Lovable SPA and needs unfiltered access to /assets/*.
-const forbiddenPatterns = new Set([`${zoneName}/assets/*`]);
+// Routes we previously created but must NOT own.
+const forbiddenPatterns = new Set([]);
 
 const existingRes = await jget(
   `https://api.cloudflare.com/client/v4/zones/${zoneId}/workers/routes`,
