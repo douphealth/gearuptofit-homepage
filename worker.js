@@ -40,6 +40,7 @@ const PROXIED_APPS = [
 const LOVABLE_ROUTES = [
   '/',
   '/shoe-match/',
+  '/shoe-finder/',
   '/blog/',
   '/calculators/',
   '/fitness-plan/',
