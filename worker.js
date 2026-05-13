@@ -408,6 +408,22 @@ export default {
       return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
     }
 
-    return fetch(request);
+    // Pass through to Lovable's origin for everything else (the apex SPA).
+    // Override HTML cache-control so newly-published builds propagate within
+    // ~60s instead of being stuck behind Cloudflare's 1h edge cache. Hashed
+    // assets keep their long TTL.
+    const originRes = await fetch(request);
+    const ct = originRes.headers.get('content-type') || '';
+    const isHtml = ct.includes('text/html');
+    // Hashed JS/CSS bundles are immutable — leave them alone.
+    const isHashedAsset = /\/assets\/.+\.[a-f0-9]{6,}\.(?:js|mjs|css|woff2?|png|jpe?g|svg|webp)$/i.test(url.pathname);
+
+    if (!isHtml || isHashedAsset) return originRes;
+
+    const headers = new Headers(originRes.headers);
+    headers.set('cache-control', 'public, max-age=60, s-maxage=60, stale-while-revalidate=300, must-revalidate');
+    headers.delete('age');
+    headers.set('x-apex-cache', 'short-html');
+    return new Response(originRes.body, { status: originRes.status, statusText: originRes.statusText, headers });
   },
 };
