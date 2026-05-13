@@ -49,9 +49,13 @@ function formatDate(iso: string): string {
 }
 
 async function fetchLatestPosts(perPage: number): Promise<LivePost[]> {
-  const endpoint = `${APEX}/wp-json/wp/v2/posts?per_page=${perPage}&_embed=wp:featuredmedia,wp:term&status=publish`;
+  // Always cache-bust so the homepage shows the actual latest posts the moment
+  // they go live on gearuptofit.com (and so the manual Refresh button is real).
+  const ts = `&_=${Date.now()}`;
+  const endpoint = `${APEX}/wp-json/wp/v2/posts?per_page=${perPage}&orderby=date&order=desc&_embed=wp:featuredmedia,wp:term&status=publish${ts}`;
   const res = await fetch(endpoint, {
-    headers: { accept: "application/json" },
+    headers: { accept: "application/json", "cache-control": "no-cache" },
+    cache: "no-store",
   });
   if (!res.ok) throw new Error(`WP REST failed: ${res.status}`);
   const data: any[] = await res.json();
@@ -85,9 +89,10 @@ export function useLatestPosts(perPage = 9) {
   return useQuery({
     queryKey: ["latest-posts", perPage],
     queryFn: () => fetchLatestPosts(perPage),
-    staleTime: 1000 * 60 * 10, // 10 min
-    refetchInterval: 1000 * 60 * 15, // 15 min
+    staleTime: 1000 * 60 * 2, // 2 min — keep it fresh
+    refetchInterval: 1000 * 60 * 5, // background poll every 5 min
     refetchOnWindowFocus: true,
+    refetchOnMount: "always",
     retry: 2,
   });
 }
