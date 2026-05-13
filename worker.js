@@ -1,6 +1,7 @@
 const APEX_HOST = 'gearuptofit.com';
 const ORIGIN_HOST = 'origin.gearuptofit.com';
 const ORIGIN_BASE = `https://${ORIGIN_HOST}`;
+const APEX_APP_HOST = 'gearup-flow-master.lovable.app';
 const SITEMAP_TTL = 3600;
 const MAX_REST_PAGES = 50;
 const AUTHORITATIVE_POST_SITEMAPS = ['/post-sitemap.xml', '/post-sitemap2.xml'];
