@@ -4,6 +4,10 @@ account_id = "5dc0401c38d9de0c6947fee40a210937"
 compatibility_date = "2026-05-07"
 
 routes = [
+  { pattern = "gearuptofit.com/", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/assets/*", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/manifest.webmanifest", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/~flock.js", zone_name = "gearuptofit.com" },
   { pattern = "gearuptofit.com/sitemap.xml", zone_name = "gearuptofit.com" },
   { pattern = "gearuptofit.com/sitemap_index.xml", zone_name = "gearuptofit.com" },
   { pattern = "gearuptofit.com/sitemap-posts.xml", zone_name = "gearuptofit.com" },
@@ -12,5 +16,7 @@ routes = [
   { pattern = "gearuptofit.com/fitness-plan", zone_name = "gearuptofit.com" },
   { pattern = "gearuptofit.com/fitness-plan/*", zone_name = "gearuptofit.com" },
   { pattern = "gearuptofit.com/watch-match", zone_name = "gearuptofit.com" },
-  { pattern = "gearuptofit.com/watch-match/*", zone_name = "gearuptofit.com" }
+  { pattern = "gearuptofit.com/watch-match/*", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/shoe-finder", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/shoe-finder/*", zone_name = "gearuptofit.com" }
 ]
