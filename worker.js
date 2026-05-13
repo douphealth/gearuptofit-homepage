@@ -451,6 +451,10 @@ export default {
       return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
     }
 
+    if (url.pathname === '/api/sub-app-status') {
+      return handleSubAppStatus();
+    }
+
     return proxyApexApp(request);
   },
 };
