@@ -48,10 +48,13 @@ function formatDate(iso: string): string {
   });
 }
 
-async function fetchLatestPosts(perPage: number): Promise<LivePost[]> {
-  const endpoint = `${APEX}/wp-json/wp/v2/posts?per_page=${perPage}&_embed=wp:featuredmedia,wp:term&status=publish`;
+async function fetchLatestPosts(perPage: number, bust: boolean): Promise<LivePost[]> {
+  // orderby=date DESC by default — newest first. Cache-bust on manual refresh.
+  const ts = bust ? `&_=${Date.now()}` : "";
+  const endpoint = `${APEX}/wp-json/wp/v2/posts?per_page=${perPage}&orderby=date&order=desc&_embed=wp:featuredmedia,wp:term&status=publish${ts}`;
   const res = await fetch(endpoint, {
     headers: { accept: "application/json" },
+    cache: bust ? "no-store" : "default",
   });
   if (!res.ok) throw new Error(`WP REST failed: ${res.status}`);
   const data: any[] = await res.json();
@@ -84,10 +87,15 @@ async function fetchLatestPosts(perPage: number): Promise<LivePost[]> {
 export function useLatestPosts(perPage = 9) {
   return useQuery({
     queryKey: ["latest-posts", perPage],
-    queryFn: () => fetchLatestPosts(perPage),
-    staleTime: 1000 * 60 * 10, // 10 min
-    refetchInterval: 1000 * 60 * 15, // 15 min
+    // React Query passes { meta } to queryFn; we read a `bust` flag from meta
+    queryFn: async ({ meta }) => {
+      const bust = Boolean((meta as { bust?: boolean } | undefined)?.bust);
+      return fetchLatestPosts(perPage, bust);
+    },
+    staleTime: 1000 * 60 * 2, // 2 min — keep it fresh
+    refetchInterval: 1000 * 60 * 5, // background poll every 5 min
     refetchOnWindowFocus: true,
+    refetchOnMount: "always",
     retry: 2,
   });
 }
