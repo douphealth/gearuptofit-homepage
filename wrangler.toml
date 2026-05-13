@@ -18,5 +18,7 @@ routes = [
   { pattern = "gearuptofit.com/watch-match", zone_name = "gearuptofit.com" },
   { pattern = "gearuptofit.com/watch-match/*", zone_name = "gearuptofit.com" },
   { pattern = "gearuptofit.com/shoe-finder", zone_name = "gearuptofit.com" },
-  { pattern = "gearuptofit.com/shoe-finder/*", zone_name = "gearuptofit.com" }
+  { pattern = "gearuptofit.com/shoe-finder/*", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/api/sub-app-status", zone_name = "gearuptofit.com" },
+  { pattern = "gearuptofit.com/status", zone_name = "gearuptofit.com" }
 ]
