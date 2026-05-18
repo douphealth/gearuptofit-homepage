@@ -268,7 +268,10 @@ async function fetchUpstream(_request, _app, upstreamUrl) {
       accept: '*/*',
       'user-agent': 'GearUpToFit-Apex-Proxy/1.0 (+https://gearuptofit.com)',
       'accept-encoding': 'gzip',
+      'cache-control': 'no-cache',
+      pragma: 'no-cache',
     },
+    cf: { cacheTtl: 0, cacheEverything: false },
     redirect: 'manual',
   });
 }
@@ -307,10 +310,16 @@ async function proxyApp(request, app) {
   const resHeaders = new Headers();
   resHeaders.set('content-type', contentType || 'application/octet-stream');
   resHeaders.set('x-proxied-from', app.upstreamHost);
+  resHeaders.set('x-upstream-deployment-id', upstreamRes.headers.get('x-deployment-id') || 'unknown');
+  resHeaders.set('x-upstream-last-modified', upstreamRes.headers.get('last-modified') || 'unknown');
   if (upstreamPath.startsWith('/assets/') || /\.(js|mjs|css|woff2?|png|jpe?g|svg|webp|ico|gif|map|json|txt)$/i.test(upstreamPath)) {
-    resHeaders.set('cache-control', 'public, max-age=86400, s-maxage=86400');
+    resHeaders.set('cache-control', 'no-cache, max-age=0, must-revalidate');
+    resHeaders.set('cdn-cache-control', 'no-cache');
+    resHeaders.set('cloudflare-cdn-cache-control', 'no-cache');
   } else {
-    resHeaders.set('cache-control', 'public, max-age=120, s-maxage=120');
+    resHeaders.set('cache-control', 'no-store, max-age=0, must-revalidate');
+    resHeaders.set('cdn-cache-control', 'no-store');
+    resHeaders.set('cloudflare-cdn-cache-control', 'no-store');
   }
 
   // ---- JS / JSON: text rewrite for asset paths and (React Router) pathname patch.
