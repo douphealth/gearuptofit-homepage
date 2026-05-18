@@ -407,7 +407,10 @@ async function proxyApexApp(request) {
     headers: {
       accept: request.headers.get('accept') || '*/*',
       'user-agent': request.headers.get('user-agent') || 'GearUpToFit-Apex-App/1.0',
+      'cache-control': 'no-cache',
+      pragma: 'no-cache',
     },
+    cf: { cacheTtl: 0, cacheEverything: false },
     redirect: 'manual',
   });
 
@@ -424,13 +427,13 @@ async function proxyApexApp(request) {
   const headers = new Headers(upstreamRes.headers);
   headers.set('x-apex-source', APEX_APP_HOST);
   if (headers.get('content-type')?.includes('text/html')) {
-    headers.set('cache-control', 'public, max-age=60, must-revalidate');
-    headers.set('cdn-cache-control', 'public, max-age=60, stale-while-revalidate=300');
-    headers.set('cloudflare-cdn-cache-control', 'public, max-age=60, stale-while-revalidate=300');
-    headers.set('surrogate-control', 'max-age=60');
+    headers.set('cache-control', 'no-store, max-age=0, must-revalidate');
+    headers.set('cdn-cache-control', 'no-store');
+    headers.set('cloudflare-cdn-cache-control', 'no-store');
+    headers.set('surrogate-control', 'no-store');
     headers.delete('age');
     headers.delete('expires');
-    headers.set('x-apex-cache', 'short-html-v3');
+    headers.set('x-apex-cache', 'live-no-store-v4');
   }
   return new Response(upstreamRes.body, { status: upstreamRes.status, statusText: upstreamRes.statusText, headers });
 }
