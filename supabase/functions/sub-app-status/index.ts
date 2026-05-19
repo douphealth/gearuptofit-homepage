@@ -5,6 +5,7 @@ const TARGETS = [
   { label: "Training plan", host: "body-recomp-os-guru.lovable.app", prefix: "/fitness-plan" },
   { label: "Watch match", host: "wrist-wonderland-hub.lovable.app", prefix: "/watch-match" },
   { label: "Shoe finder", host: "runmatch-ai-buddy.lovable.app", prefix: "/shoe-finder" },
+  { label: "Supplement match", host: "nutri-match-wiz.lovable.app", prefix: "/supplement-match" },
 ];
 
 async function probeHost(target: (typeof TARGETS)[number]) {
