@@ -34,7 +34,7 @@ const tools: ToolCard[] = [
     description:
       "Match vitamins and supplements to your training goals, diet, health profile, and budget with evidence-based recommendations and safety-aware guidance.",
     cta: "Find My Supplement Match",
-    url: "https://gearuptofit.com/supplement-match/",
+    url: "https://nutri-match-wiz.lovable.app/",
     icon: Pill,
     anchorLabel: "supplement and vitamin match",
   },

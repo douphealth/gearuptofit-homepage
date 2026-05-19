@@ -39,7 +39,7 @@ const CTASection = () => {
               Find Your Fitness Watch
             </a>
             <a
-              href="https://gearuptofit.com/supplement-match/"
+              href="https://nutri-match-wiz.lovable.app/"
               className="inline-flex items-center justify-center gap-2 px-8 py-4 border border-primary/50 font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
             >
               Find Your Supplement Match
