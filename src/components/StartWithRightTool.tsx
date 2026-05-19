@@ -30,6 +30,15 @@ const tools: ToolCard[] = [
     anchorLabel: "fitness watch finder",
   },
   {
+    title: "Supplement Match",
+    description:
+      "Match vitamins and supplements to your training goals, diet, health profile, and budget with evidence-based recommendations and safety-aware guidance.",
+    cta: "Find My Supplement Match",
+    url: "https://gearuptofit.com/supplement-match/",
+    icon: Pill,
+    anchorLabel: "supplement and vitamin match",
+  },
+  {
     title: "Fitness Plan",
     description:
       "Build a realistic fitness plan based on your goal, fitness level, schedule, training preferences, and available equipment.",
