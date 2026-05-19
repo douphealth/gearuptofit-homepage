@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { ArrowRight, Footprints, Watch, ClipboardList, Calculator } from "lucide-react";
+import { ArrowRight, Footprints, Watch, Pill, ClipboardList, Calculator } from "lucide-react";
 
 interface ToolCard {
   title: string;
