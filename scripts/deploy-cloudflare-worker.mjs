@@ -112,6 +112,8 @@ const desiredRoutes = [
   '/watch-match/*',
   '/shoe-finder',
   '/shoe-finder/*',
+  '/supplement-match',
+  '/supplement-match/*',
   '/~api/analytics',
   '/api/sub-app-status',
   '/status',
