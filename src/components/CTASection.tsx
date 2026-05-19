@@ -20,8 +20,8 @@ const CTASection = () => {
           </h2>
 
           <p className="text-lg md:text-xl text-muted-foreground font-body max-w-2xl mx-auto mb-10 leading-relaxed">
-            Match your running shoes, find the right fitness watch, build a realistic plan, and use free calculators
-            — all in one place.
+            Match your running shoes, find the right fitness watch, dial in your supplement stack, build a realistic
+            plan, and use free calculators — all in one place.
           </p>
 
           <div className="flex flex-col sm:flex-row flex-wrap gap-3 justify-center">
