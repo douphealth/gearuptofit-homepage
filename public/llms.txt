@@ -18,7 +18,9 @@
 
 ## Interactive Tools
 - Running Shoe Finder (9-question quiz): https://gearuptofit.com/shoe-finder/
-- 8-Week Custom Training Plan Builder: https://fitness-plan.gearuptofit.com/
+- Watch Match — Fitness & Running Watch Finder: https://gearuptofit.com/watch-match/
+- Supplement Match — Vitamin & Supplement Stack Builder: https://gearuptofit.com/supplement-match/
+- 8-Week Custom Training Plan Builder: https://gearuptofit.com/fitness-plan/
 - Free Fitness Calculators (BMI, TDEE, Macro, Body Fat, BMR): https://gearuptofit.com/fitness-and-health-calculators/
 
 ## Latest Featured Reviews & Guides (2026)

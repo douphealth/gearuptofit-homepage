@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { ArrowRight, Footprints, Watch, ClipboardList, Calculator } from "lucide-react";
+import { ArrowRight, Footprints, Watch, Pill, ClipboardList, Calculator } from "lucide-react";
 
 interface ToolCard {
   title: string;
@@ -28,6 +28,15 @@ const tools: ToolCard[] = [
     url: "https://gearuptofit.com/watch-match/",
     icon: Watch,
     anchorLabel: "fitness watch finder",
+  },
+  {
+    title: "Supplement Match",
+    description:
+      "Match vitamins and supplements to your training goals, diet, health profile, and budget with evidence-based recommendations and safety-aware guidance.",
+    cta: "Find My Supplement Match",
+    url: "https://gearuptofit.com/supplement-match/",
+    icon: Pill,
+    anchorLabel: "supplement and vitamin match",
   },
   {
     title: "Fitness Plan",

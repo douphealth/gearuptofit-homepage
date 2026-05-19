@@ -62,6 +62,11 @@ const SiteFooter = () => {
                 </a>
               </li>
               <li>
+                <a href="https://gearuptofit.com/supplement-match/" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                  Supplement Match
+                </a>
+              </li>
+              <li>
                 <a href="https://gearuptofit.com/fitness-plan/" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
                   Fitness Plan
                 </a>

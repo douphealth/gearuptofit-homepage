@@ -70,6 +70,14 @@ const HeroSection = () => {
                 <ArrowRight className="w-5 h-5" />
               </a>
               <a
+                href="https://gearuptofit.com/supplement-match/"
+                aria-label="Find your supplement match with Supplement Match"
+                className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-primary font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
+              >
+                Find Your Supplement Match
+                <ArrowRight className="w-5 h-5" />
+              </a>
+              <a
                 href="https://gearuptofit.com/fitness-plan/"
                 aria-label="Build your fitness plan"
                 className="inline-flex items-center justify-center gap-2 px-6 py-4 border border-primary/50 font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
@@ -79,7 +87,7 @@ const HeroSection = () => {
               <a
                 href="https://gearuptofit.com/fitness-and-health-calculators/"
                 aria-label="Explore fitness and health calculators"
-                className="inline-flex items-center justify-center gap-2 px-6 py-4 border border-primary/50 font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary"
+                className="inline-flex items-center justify-center gap-2 px-6 py-4 border border-primary/50 font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:bg-primary/10 hover:border-primary active:scale-[0.97] rounded-sm text-primary sm:col-span-2"
               >
                 Explore Fitness Calculators
               </a>

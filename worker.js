@@ -32,6 +32,13 @@ const PROXIED_APPS = [
     description: 'Find the right running shoe for your gait, mileage, and terrain. Honest, data-driven matches from Gear Up To Fit.',
     framework: 'react-router',
   },
+  {
+    prefix: '/supplement-match',
+    upstreamHost: 'nutri-match-wiz.lovable.app',
+    title: 'Supplement Match — Find Your Vitamin & Supplement Stack | Gear Up To Fit',
+    description: 'Match the right vitamins and supplements to your goals, diet, and training. Evidence-based, personalized recommendations from Gear Up To Fit.',
+    framework: 'react-router',
+  },
 ];
 
 // Only routes that actually return 200 from the apex (verified). Routes that
@@ -46,6 +53,7 @@ const LOVABLE_ROUTES = [
   '/calculators/',
   '/fitness-plan/',
   '/watch-match/',
+  '/supplement-match/',
 ];
 
 // ---------- sitemap helpers (unchanged) ----------

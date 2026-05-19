@@ -21,7 +21,9 @@
 
   <!-- Tools -->
   <url><loc>https://gearuptofit.com/shoe-finder/</loc><changefreq>monthly</changefreq><priority>0.95</priority></url>
-  <url><loc>https://fitness-plan.gearuptofit.com/</loc><changefreq>monthly</changefreq><priority>0.95</priority></url>
+  <url><loc>https://gearuptofit.com/watch-match/</loc><changefreq>monthly</changefreq><priority>0.95</priority></url>
+  <url><loc>https://gearuptofit.com/supplement-match/</loc><changefreq>monthly</changefreq><priority>0.95</priority></url>
+  <url><loc>https://gearuptofit.com/fitness-plan/</loc><changefreq>monthly</changefreq><priority>0.95</priority></url>
   <url><loc>https://gearuptofit.com/fitness-and-health-calculators/</loc><changefreq>monthly</changefreq><priority>0.9</priority></url>
 
   <!-- Featured / trending posts -->
