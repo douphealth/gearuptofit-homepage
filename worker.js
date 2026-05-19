@@ -37,7 +37,7 @@ const PROXIED_APPS = [
     upstreamHost: 'nutri-match-wiz.lovable.app',
     title: 'Supplement Match — Find Your Vitamin & Supplement Stack | Gear Up To Fit',
     description: 'Match the right vitamins and supplements to your goals, diet, and training. Evidence-based, personalized recommendations from Gear Up To Fit.',
-    framework: 'react-router',
+    framework: 'tanstack-start',
   },
 ];
 
