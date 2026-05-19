@@ -70,7 +70,7 @@ const HeroSection = () => {
                 <ArrowRight className="w-5 h-5" />
               </a>
               <a
-                href="https://gearuptofit.com/supplement-match/"
+                href="https://lovable.dev/projects/c0d2104a-7e3c-45a2-9f52-6ab2ec917c44"
                 aria-label="Find your supplement match with Supplement Match"
                 className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-primary font-display text-base md:text-lg uppercase tracking-wider font-semibold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm"
               >
