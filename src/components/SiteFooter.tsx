@@ -62,7 +62,7 @@ const SiteFooter = () => {
                 </a>
               </li>
               <li>
-                <a href="https://lovable.dev/projects/c0d2104a-7e3c-45a2-9f52-6ab2ec917c44" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                <a href="https://gearuptofit.com/supplement-match/" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
                   Supplement Match
                 </a>
               </li>
