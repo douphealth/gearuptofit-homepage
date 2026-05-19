@@ -62,7 +62,7 @@ const SiteFooter = () => {
                 </a>
               </li>
               <li>
-                <a href="https://gearuptofit.com/supplement-match/" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
+                <a href="https://nutri-match-wiz.lovable.app/" className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200 font-body">
                   Supplement Match
                 </a>
               </li>
