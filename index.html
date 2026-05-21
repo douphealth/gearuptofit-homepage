@@ -288,7 +288,11 @@
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- SEO/AEO fallback: ensures a semantic H1 in server-rendered HTML for crawlers that don't execute JS. Replaced on React hydration. -->
+      <h1>Running Shoe Reviews, Fitness Calculators &amp; Training Tools for Smarter Fitness</h1>
+      <p>GearUpToFit helps runners and active people choose better running shoes, compare fitness watches, find the right smartwatch, calculate training targets, and build realistic workout plans using evidence-aware guides and free tools.</p>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
