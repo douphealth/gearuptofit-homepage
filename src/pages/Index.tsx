@@ -1,18 +1,16 @@
 import SiteHeader from "@/components/SiteHeader";
-import HeroSection from "@/components/HeroSection";
-import StartWithRightTool from "@/components/StartWithRightTool";
-import LiveTicker from "@/components/LiveTicker";
-import FitnessQuiz from "@/components/FitnessQuiz";
-import CategoryPillars from "@/components/CategoryPillars";
-import FeaturedArticle from "@/components/FeaturedArticle";
-import LatestFromBlog from "@/components/LatestFromBlog";
-import TrendingSection from "@/components/TrendingSection";
-import DeepDiveSection from "@/components/DeepDiveSection";
-import CalculatorsHub from "@/components/CalculatorsHub";
-import FAQSection from "@/components/FAQSection";
-import TrustSignals from "@/components/TrustSignals";
-import CTASection from "@/components/CTASection";
 import SiteFooter from "@/components/SiteFooter";
+import HeroSection from "@/components/home/HeroSection";
+import QuickAnswerSection from "@/components/home/QuickAnswerSection";
+import IntentRouter from "@/components/home/IntentRouter";
+import ToolsSection from "@/components/home/ToolsSection";
+import TopicMap from "@/components/home/TopicMap";
+import BestStartingPoints from "@/components/home/BestStartingPoints";
+import FeaturedGuides from "@/components/home/FeaturedGuides";
+import QuickAnswers from "@/components/home/QuickAnswers";
+import TrustSection from "@/components/home/TrustSection";
+import LatestGuides from "@/components/home/LatestGuides";
+import FinalCTA from "@/components/home/FinalCTA";
 
 const Index = () => {
   return (
@@ -21,20 +19,16 @@ const Index = () => {
       <main role="main">
         <article itemScope itemType="https://schema.org/WebPage">
           <HeroSection />
-          <StartWithRightTool />
-          <FitnessQuiz />
-          <LiveTicker />
-          <nav aria-label="Content categories">
-            <CategoryPillars />
-          </nav>
-          <FeaturedArticle />
-          <LatestFromBlog />
-          <TrendingSection />
-          <DeepDiveSection />
-          <CalculatorsHub />
-          <TrustSignals />
-          <FAQSection />
-          <CTASection />
+          <QuickAnswerSection />
+          <IntentRouter />
+          <ToolsSection />
+          <TopicMap />
+          <BestStartingPoints />
+          <FeaturedGuides />
+          <QuickAnswers />
+          <TrustSection />
+          <LatestGuides />
+          <FinalCTA />
         </article>
       </main>
       <SiteFooter />
