@@ -14,8 +14,8 @@
     <link rel="dns-prefetch" href="https://gearuptofit.com" />
 
     <!-- Primary SEO -->
-    <title>Running Shoe Reviews, Fitness Calculators &amp; Training Tools | GearUpToFit</title>
-    <meta name="description" content="Find running shoe reviews, a running shoe finder, Watch Match fitness watch tool, fitness plans, fitness calculators, and evidence-aware fitness guides." />
+    <title>Running Shoe Reviews, Fitness Calculators &amp; Smart Fitness Tools | GearUpToFit</title>
+    <meta name="description" content="GearUpToFit helps runners and active people choose running shoes, compare fitness watches, use free fitness calculators, and build smarter training, nutrition, and recovery plans." />
     <meta name="keywords" content="running shoes, running shoe finder, running shoe reviews, fitness watch, smartwatch, watch match, fitness plan, training plan, fitness calculators, running calculators, zone 2 calculator, macro calculator, running pace calculator, BMI calculator, TDEE calculator" />
     <link rel="canonical" href="https://gearuptofit.com/" />
     <link rel="alternate" hreflang="en" href="https://gearuptofit.com/" />
@@ -195,7 +195,6 @@
       "applicationCategory": "HealthApplication",
       "operatingSystem": "Web",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-      "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.8", "ratingCount": "2450" },
       "description": "Free science-based fitness calculators: BMI, TDEE, macros, body fat, calorie burn, heart-rate zones, running pace, and more."
     }
     </script>
@@ -210,8 +209,50 @@
       "applicationCategory": "HealthApplication",
       "operatingSystem": "Web",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-      "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.9", "ratingCount": "1820" },
       "description": "Find running shoes that match your foot type, running goals, terrain, cushioning needs, support needs, and budget."
+    }
+    </script>
+
+    <!-- JSON-LD: Homepage @graph (Organization + WebSite + WebPage) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://gearuptofit.com/#organization",
+          "name": "GearUpToFit",
+          "url": "https://gearuptofit.com/",
+          "description": "GearUpToFit publishes running shoe reviews, fitness gear guides, training tools, calculators, and evidence-aware fitness and nutrition guidance.",
+          "founder": { "@type": "Person", "name": "Alexios Papaioannou" }
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://gearuptofit.com/#website-graph",
+          "url": "https://gearuptofit.com/",
+          "name": "GearUpToFit",
+          "publisher": { "@id": "https://gearuptofit.com/#organization" },
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://gearuptofit.com/?s={search_term_string}",
+            "query-input": "required name=search_term_string"
+          }
+        },
+        {
+          "@type": "WebPage",
+          "@id": "https://gearuptofit.com/#webpage-graph",
+          "url": "https://gearuptofit.com/",
+          "name": "Running Shoe Reviews, Fitness Calculators & Smart Fitness Tools",
+          "isPartOf": { "@id": "https://gearuptofit.com/#website-graph" },
+          "about": [
+            { "@type": "Thing", "name": "Running shoes" },
+            { "@type": "Thing", "name": "Fitness calculators" },
+            { "@type": "Thing", "name": "Fitness watches" },
+            { "@type": "Thing", "name": "Training plans" },
+            { "@type": "Thing", "name": "Sports nutrition" }
+          ]
+        }
+      ]
     }
     </script>
 
@@ -289,9 +330,9 @@
 
   <body>
     <div id="root">
-      <!-- SEO/AEO fallback: ensures a semantic H1 in server-rendered HTML for crawlers that don't execute JS. Replaced on React hydration. -->
-      <h1>Running Shoe Reviews, Fitness Calculators &amp; Training Tools for Smarter Fitness</h1>
-      <p>GearUpToFit helps runners and active people choose better running shoes, compare fitness watches, find the right smartwatch, calculate training targets, and build realistic workout plans using evidence-aware guides and free tools.</p>
+      <!-- SEO/AEO fallback: semantic H1 in server-rendered HTML for crawlers that don't execute JS. Replaced on React hydration. -->
+      <h1>Running Shoe Reviews, Fitness Calculators &amp; Smart Fitness Tools</h1>
+      <p>GearUpToFit helps runners and active people choose better running shoes, compare fitness watches, use accurate training calculators, and build practical fitness, nutrition, and recovery plans with evidence-aware guides and practical decision tools.</p>
     </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
