@@ -1,6 +1,8 @@
 import SiteHeader from "@/components/SiteHeader";
 import HeroSection from "@/components/HeroSection";
 import StartWithRightTool from "@/components/StartWithRightTool";
+import BestPlacesToStart from "@/components/BestPlacesToStart";
+import FeaturedShoeGuides from "@/components/FeaturedShoeGuides";
 import LiveTicker from "@/components/LiveTicker";
 import FitnessQuiz from "@/components/FitnessQuiz";
 import CategoryPillars from "@/components/CategoryPillars";
@@ -9,6 +11,8 @@ import LatestFromBlog from "@/components/LatestFromBlog";
 import TrendingSection from "@/components/TrendingSection";
 import DeepDiveSection from "@/components/DeepDiveSection";
 import CalculatorsHub from "@/components/CalculatorsHub";
+import QuickAnswers from "@/components/QuickAnswers";
+import WhyTrustGearUpToFit from "@/components/WhyTrustGearUpToFit";
 import FAQSection from "@/components/FAQSection";
 import TrustSignals from "@/components/TrustSignals";
 import CTASection from "@/components/CTASection";
@@ -22,6 +26,8 @@ const Index = () => {
         <article itemScope itemType="https://schema.org/WebPage">
           <HeroSection />
           <StartWithRightTool />
+          <BestPlacesToStart />
+          <FeaturedShoeGuides />
           <FitnessQuiz />
           <LiveTicker />
           <nav aria-label="Content categories">
@@ -32,6 +38,8 @@ const Index = () => {
           <TrendingSection />
           <DeepDiveSection />
           <CalculatorsHub />
+          <WhyTrustGearUpToFit />
+          <QuickAnswers />
           <TrustSignals />
           <FAQSection />
           <CTASection />

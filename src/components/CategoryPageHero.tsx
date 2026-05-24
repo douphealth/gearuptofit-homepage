@@ -10,9 +10,15 @@ interface CategoryPageHeroProps {
   stats: { num: string; label: string }[];
   categoryUrl: string;
   heroImage?: string;
+  /** Override the default "{title} / Command Center" H1. When set, replaces both lines. */
+  h1Override?: string;
+  /** Override the small uppercase chip label (defaults to "{title} Hub"). */
+  badgeLabel?: string;
+  /** Custom label for the CTA link (defaults to "Browse All {title} Articles →"). */
+  ctaLabel?: string;
 }
 
-const CategoryPageHero = ({ icon, title, gradient, description, stats, categoryUrl, heroImage }: CategoryPageHeroProps) => (
+const CategoryPageHero = ({ icon, title, gradient, description, stats, categoryUrl, heroImage, h1Override, badgeLabel, ctaLabel }: CategoryPageHeroProps) => (
   <section className="relative min-h-[50vh] sm:min-h-[60vh] md:min-h-[70vh] flex items-end overflow-hidden">
     {heroImage && (
       <div className="absolute inset-0">
