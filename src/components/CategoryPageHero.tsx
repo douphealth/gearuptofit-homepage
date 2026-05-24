@@ -10,9 +10,15 @@ interface CategoryPageHeroProps {
   stats: { num: string; label: string }[];
   categoryUrl: string;
   heroImage?: string;
+  /** Override the default "{title} / Command Center" H1. When set, replaces both lines. */
+  h1Override?: string;
+  /** Override the small uppercase chip label (defaults to "{title} Hub"). */
+  badgeLabel?: string;
+  /** Custom label for the CTA link (defaults to "Browse All {title} Articles →"). */
+  ctaLabel?: string;
 }
 
-const CategoryPageHero = ({ icon, title, gradient, description, stats, categoryUrl, heroImage }: CategoryPageHeroProps) => (
+const CategoryPageHero = ({ icon, title, gradient, description, stats, categoryUrl, heroImage, h1Override, badgeLabel, ctaLabel }: CategoryPageHeroProps) => (
   <section className="relative min-h-[50vh] sm:min-h-[60vh] md:min-h-[70vh] flex items-end overflow-hidden">
     {heroImage && (
       <div className="absolute inset-0">
@@ -39,14 +45,20 @@ const CategoryPageHero = ({ icon, title, gradient, description, stats, categoryU
           <span className="text-3xl sm:text-5xl">{icon}</span>
           <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 bg-primary/10 border border-primary/25 rounded-sm backdrop-blur-sm">
             <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" /><span className="relative inline-flex rounded-full h-2 w-2 bg-primary" /></span>
-            <span className="text-[10px] sm:text-xs font-bold tracking-[0.2em] sm:tracking-[0.25em] uppercase text-primary font-display">{title} Hub</span>
+            <span className="text-[10px] sm:text-xs font-bold tracking-[0.2em] sm:tracking-[0.25em] uppercase text-primary font-display">{badgeLabel ?? `${title} Hub`}</span>
           </div>
         </div>
 
-        <h1 className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl font-bold uppercase tracking-tight leading-[0.9] mb-4 sm:mb-6 font-display max-w-3xl">
-          <span className="block">{title}</span>
-          <span className="block text-gradient-red">Command Center</span>
-        </h1>
+        {h1Override ? (
+          <h1 className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl font-bold uppercase tracking-tight leading-[0.9] mb-4 sm:mb-6 font-display max-w-3xl">
+            <span className="block">{h1Override}</span>
+          </h1>
+        ) : (
+          <h1 className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl font-bold uppercase tracking-tight leading-[0.9] mb-4 sm:mb-6 font-display max-w-3xl">
+            <span className="block">{title}</span>
+            <span className="block text-gradient-red">Command Center</span>
+          </h1>
+        )}
 
         <p className="text-sm sm:text-lg md:text-xl text-muted-foreground max-w-xl mb-6 sm:mb-10 font-body leading-relaxed">{description}</p>
 
@@ -61,7 +73,7 @@ const CategoryPageHero = ({ icon, title, gradient, description, stats, categoryU
 
         <a href={categoryUrl} target="_blank" rel="noopener noreferrer"
           className="inline-flex items-center gap-2 mt-6 sm:mt-8 px-5 sm:px-6 py-2.5 sm:py-3 bg-primary font-display text-xs sm:text-sm uppercase tracking-wider font-bold transition-all duration-200 hover:brightness-110 active:scale-[0.97] glow-red rounded-sm text-primary-foreground">
-          Browse All {title} Articles →
+          {ctaLabel ?? `Browse All ${title} Articles →`}
         </a>
       </motion.div>
     </div>
