@@ -289,10 +289,162 @@
 
   <body>
     <div id="root">
-      <!-- SEO/AEO fallback: ensures a semantic H1 in server-rendered HTML for crawlers that don't execute JS. Replaced on React hydration. -->
-      <h1>Running Shoe Reviews, Fitness Calculators &amp; Training Tools for Smarter Fitness</h1>
-      <p>GearUpToFit helps runners and active people choose better running shoes, compare fitness watches, find the right smartwatch, calculate training targets, and build realistic workout plans using evidence-aware guides and free tools.</p>
+      <!-- SEO/AEO/GEO fallback: rich semantic content for non-JS crawlers, LLM browsers (ChatGPT, Perplexity, Claude, Gemini), and answer engines. Replaced on React hydration. -->
+      <header>
+        <a href="https://gearuptofit.com/" rel="home"><strong>GearUpToFit</strong></a>
+        <nav aria-label="Primary">
+          <ul>
+            <li><a href="https://gearuptofit.com/running/">Running</a></li>
+            <li><a href="https://gearuptofit.com/fitness/">Fitness</a></li>
+            <li><a href="https://gearuptofit.com/nutrition/">Nutrition</a></li>
+            <li><a href="https://gearuptofit.com/health/">Health</a></li>
+            <li><a href="https://gearuptofit.com/weight-loss/">Weight Loss</a></li>
+            <li><a href="https://gearuptofit.com/review/">Reviews</a></li>
+            <li><a href="https://gearuptofit.com/fitness-and-health-calculators/">Calculators</a></li>
+          </ul>
+        </nav>
+      </header>
+      <main>
+        <article>
+          <h1>Running Shoe Reviews, Fitness Calculators &amp; Training Tools for Smarter Fitness</h1>
+          <p data-speakable="true"><strong>GearUpToFit</strong> is an independent fitness publication and tools hub helping runners and active people choose better <a href="https://gearuptofit.com/shoe-finder/">running shoes</a>, compare <a href="https://gearuptofit.com/watch-match/">fitness watches and smartwatches</a>, match <a href="https://gearuptofit.com/supplement-match/">evidence-based supplements</a>, build a free <a href="https://gearuptofit.com/fitness-plan/">8-week fitness plan</a>, and use <a href="https://gearuptofit.com/fitness-and-health-calculators/">free science-based calculators</a> for BMI, TDEE, macros, heart-rate zones, VO2 max, and running pace.</p>
+
+          <section>
+            <h2>Free Fitness Tools</h2>
+            <ul>
+              <li><a href="https://gearuptofit.com/shoe-finder/"><strong>Running Shoe Finder</strong></a> — Personalized running shoe recommendations based on foot type, weekly mileage, terrain, cushioning, support needs, and budget.</li>
+              <li><a href="https://gearuptofit.com/watch-match/"><strong>Watch Match</strong></a> — Match the right fitness watch, running watch, or smartwatch by GPS accuracy, battery life, heart-rate tracking, training metrics, and price.</li>
+              <li><a href="https://gearuptofit.com/supplement-match/"><strong>Supplement Match</strong></a> — Evidence-based vitamin and supplement quiz tailored to training goals, diet, and health profile.</li>
+              <li><a href="https://gearuptofit.com/fitness-plan/"><strong>Body Recomp OS</strong></a> — Free 8-week fitness planner for strength, fat loss, and body recomposition.</li>
+              <li><a href="https://gearuptofit.com/fitness-and-health-calculators/"><strong>Fitness &amp; Health Calculators</strong></a> — 16+ calculators: BMI, TDEE, macros, body fat, calorie burn, heart-rate zones, running pace, one-rep max, VO2 max, and more.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>Topics We Cover</h2>
+            <ul>
+              <li><a href="https://gearuptofit.com/running/">Running</a> — Training plans, race prep, pace, recovery, and running shoe reviews.</li>
+              <li><a href="https://gearuptofit.com/fitness/">Fitness</a> — Strength training, HIIT, mobility, VO2 max, and progressive overload.</li>
+              <li><a href="https://gearuptofit.com/nutrition/">Nutrition</a> — Macros, protein, hydration, fueling for endurance, and metabolism.</li>
+              <li><a href="https://gearuptofit.com/health/">Health</a> — Sleep, recovery, heart-rate variability, longevity, and supplements.</li>
+              <li><a href="https://gearuptofit.com/weight-loss/">Weight Loss</a> — Calorie deficits, body recomposition, and sustainable fat loss.</li>
+              <li><a href="https://gearuptofit.com/review/">Reviews</a> — Independent reviews of running shoes, smartwatches, headphones, and gear.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>Frequently Asked Questions</h2>
+            <h3>What is GearUpToFit?</h3>
+            <p>GearUpToFit is a running gear, fitness tools, fitness watch, training plan, and calculator website that helps users choose running shoes, compare fitness watches, use calculators, and build smarter fitness plans.</p>
+            <h3>Are GearUpToFit's tools free?</h3>
+            <p>Yes. The Running Shoe Finder, Watch Match, Supplement Match, Fitness Plan, and all 16+ fitness and health calculators are free to use, with no signup required.</p>
+            <h3>How does GearUpToFit make recommendations?</h3>
+            <p>Recommendations are evidence-aware and based on published sports-science research, real-world testing, and transparent quiz logic. Some pages include clearly disclosed affiliate links, but recommendations stay user-first.</p>
+            <h3>Is GearUpToFit medical advice?</h3>
+            <p>No. GearUpToFit provides educational fitness information and planning tools. Consult a qualified professional for medical, injury, or health-specific advice.</p>
+          </section>
+        </article>
+      </main>
     </div>
+
+    <!-- JSON-LD: CollectionPage with expanded tool ItemList (AEO/GEO entity coverage) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      "@id": "https://gearuptofit.com/#collection",
+      "url": "https://gearuptofit.com/",
+      "name": "GearUpToFit — Free Fitness Tools, Running Shoe Reviews & Health Calculators",
+      "headline": "Running Shoe Reviews, Fitness Calculators & Training Tools for Smarter Fitness",
+      "description": "Free running shoe finder, fitness watch matcher, supplement quiz, 8-week fitness plan, and 16+ science-based fitness and health calculators.",
+      "inLanguage": "en",
+      "isFamilyFriendly": true,
+      "keywords": "running shoes, running shoe finder, fitness watch, smartwatch, supplement quiz, fitness plan, BMI calculator, TDEE calculator, macro calculator, running pace calculator, VO2 max, heart-rate zones, body recomposition",
+      "audience": { "@type": "Audience", "audienceType": "Runners, fitness enthusiasts, athletes, and active adults" },
+      "mainEntity": {
+        "@type": "ItemList",
+        "name": "GearUpToFit Free Tools",
+        "numberOfItems": 5,
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "item": { "@type": "WebApplication", "name": "Running Shoe Finder", "url": "https://gearuptofit.com/shoe-finder/", "applicationCategory": "HealthApplication", "operatingSystem": "Web", "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" } } },
+          { "@type": "ListItem", "position": 2, "item": { "@type": "WebApplication", "name": "Watch Match", "url": "https://gearuptofit.com/watch-match/", "applicationCategory": "HealthApplication", "operatingSystem": "Web", "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" } } },
+          { "@type": "ListItem", "position": 3, "item": { "@type": "WebApplication", "name": "Supplement Match", "url": "https://gearuptofit.com/supplement-match/", "applicationCategory": "HealthApplication", "operatingSystem": "Web", "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" } } },
+          { "@type": "ListItem", "position": 4, "item": { "@type": "WebApplication", "name": "Body Recomp OS — 8-Week Fitness Planner", "url": "https://gearuptofit.com/fitness-plan/", "applicationCategory": "HealthApplication", "operatingSystem": "Web", "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" } } },
+          { "@type": "ListItem", "position": 5, "item": { "@type": "WebApplication", "name": "Fitness & Health Calculators", "url": "https://gearuptofit.com/fitness-and-health-calculators/", "applicationCategory": "HealthApplication", "operatingSystem": "Web", "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" } } }
+        ]
+      }
+    }
+    </script>
+
+    <!-- JSON-LD: Service entities (topical authority signals) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      "name": "GearUpToFit Editorial Coverage",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "item": { "@type": "Thing", "name": "Running", "url": "https://gearuptofit.com/running/", "description": "Training plans, race prep, pace and recovery guidance, and running shoe reviews." } },
+        { "@type": "ListItem", "position": 2, "item": { "@type": "Thing", "name": "Fitness", "url": "https://gearuptofit.com/fitness/", "description": "Strength training, HIIT, mobility, VO2 max, and progressive overload." } },
+        { "@type": "ListItem", "position": 3, "item": { "@type": "Thing", "name": "Nutrition", "url": "https://gearuptofit.com/nutrition/", "description": "Macros, protein, hydration, endurance fueling, and metabolism." } },
+        { "@type": "ListItem", "position": 4, "item": { "@type": "Thing", "name": "Health", "url": "https://gearuptofit.com/health/", "description": "Sleep, recovery, HRV, longevity, and supplement guidance." } },
+        { "@type": "ListItem", "position": 5, "item": { "@type": "Thing", "name": "Weight Loss", "url": "https://gearuptofit.com/weight-loss/", "description": "Calorie deficits, body recomposition, and sustainable fat loss." } },
+        { "@type": "ListItem", "position": 6, "item": { "@type": "Thing", "name": "Gear Reviews", "url": "https://gearuptofit.com/review/", "description": "Independent reviews of running shoes, smartwatches, headphones, and training gear." } }
+      ]
+    }
+    </script>
+
+    <!-- JSON-LD: HowTo for Watch Match (AEO) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "How to Choose the Right Fitness Watch",
+      "description": "Use Watch Match to compare fitness watches, running watches, and smartwatches by GPS, battery life, heart-rate tracking, training features, and budget.",
+      "totalTime": "PT2M",
+      "tool": [{ "@type": "HowToTool", "name": "GearUpToFit Watch Match" }],
+      "step": [
+        { "@type": "HowToStep", "position": 1, "name": "Open Watch Match", "text": "Visit gearuptofit.com/watch-match/.", "url": "https://gearuptofit.com/watch-match/" },
+        { "@type": "HowToStep", "position": 2, "name": "Pick your activities", "text": "Tell us which activities matter most: running, cycling, swimming, hiking, gym, or general health." },
+        { "@type": "HowToStep", "position": 3, "name": "Set priorities", "text": "Rank GPS accuracy, battery life, heart-rate accuracy, training features, and budget." },
+        { "@type": "HowToStep", "position": 4, "name": "Get matched watches", "text": "Receive personalized smartwatch and fitness watch recommendations with pros, cons, and links." }
+      ]
+    }
+    </script>
+
+    <!-- JSON-LD: HowTo for Fitness Plan -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "How to Build a Free 8-Week Fitness Plan",
+      "description": "Use Body Recomp OS to build a realistic 8-week fitness plan for strength, fat loss, or body recomposition.",
+      "totalTime": "PT3M",
+      "tool": [{ "@type": "HowToTool", "name": "GearUpToFit Body Recomp OS" }],
+      "step": [
+        { "@type": "HowToStep", "position": 1, "name": "Open the planner", "text": "Visit gearuptofit.com/fitness-plan/.", "url": "https://gearuptofit.com/fitness-plan/" },
+        { "@type": "HowToStep", "position": 2, "name": "Set your goal", "text": "Choose between fat loss, muscle gain, body recomposition, or general fitness." },
+        { "@type": "HowToStep", "position": 3, "name": "Tell us your schedule and experience", "text": "Pick training days per week and your current strength and cardio level." },
+        { "@type": "HowToStep", "position": 4, "name": "Get your 8-week plan", "text": "Receive a structured 8-week plan with workouts, intensity targets, and progression." }
+      ]
+    }
+    </script>
+
+    <!-- JSON-LD: Expanded FAQPage (mirrors visible fallback FAQ, expanded for AEO) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "@id": "https://gearuptofit.com/#faq-extended",
+      "mainEntity": [
+        { "@type": "Question", "name": "Are GearUpToFit's tools free?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. The Running Shoe Finder, Watch Match, Supplement Match, Fitness Plan, and all 16+ fitness and health calculators are free, with no signup required." }},
+        { "@type": "Question", "name": "How does GearUpToFit make recommendations?", "acceptedAnswer": { "@type": "Answer", "text": "Recommendations are evidence-aware and based on published sports-science research, real-world testing, and transparent quiz logic. Some pages include clearly disclosed affiliate links, but recommendations stay user-first." }},
+        { "@type": "Question", "name": "Which calculators does GearUpToFit offer?", "acceptedAnswer": { "@type": "Answer", "text": "GearUpToFit offers 16+ free calculators including BMI, TDEE, macro, body fat, calorie burn, heart-rate zones, VO2 max, running pace, one-rep max, protein intake, water intake, and Zone 2 calculators." }},
+        { "@type": "Question", "name": "Is the 8-week fitness plan suitable for beginners?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Body Recomp OS adapts to your current fitness level, available training days, and goals — making it suitable for beginners through advanced trainees." }},
+        { "@type": "Question", "name": "Does GearUpToFit review smartwatches and running watches?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. GearUpToFit publishes independent reviews of smartwatches, running watches, and fitness wearables from brands like Garmin, Apple, Huawei, Amazfit, Polar, Coros, and Suunto." }}
+      ]
+    }
+    </script>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
